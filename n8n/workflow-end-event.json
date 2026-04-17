@@ -1,0 +1,82 @@
+{
+  "name": "GestorSala — End Event",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sala-finalizar",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+              { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+            ]
+          }
+        }
+      },
+      "id": "1e1e1e1e-eeee-eeee-eeee-111111111111",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "sala-finalizar"
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "update",
+        "calendar": {
+          "__rl": true,
+          "value": "c_36b4c6c75706ffff8b32d991f27c2ac8e0b338cfd8d2c580259d7e8fb02fd191@group.calendar.google.com",
+          "mode": "id"
+        },
+        "eventId": "={{ $json.body.eventId }}",
+        "updateFields": {
+          "end": "={{ $now.toISO() }}"
+        }
+      },
+      "id": "2e2e2e2e-eeee-eeee-eeee-222222222222",
+      "name": "Google Calendar — Update",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [440, 300],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REEMPLAZAR_CREDENTIAL_ID",
+          "name": "Google Calendar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Content-Type", "value": "application/json" }
+            ]
+          }
+        }
+      },
+      "id": "3e3e3e3e-eeee-eeee-eeee-333333333333",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Google Calendar — Update", "type": "main", "index": 0 }]]
+    },
+    "Google Calendar — Update": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

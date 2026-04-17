@@ -1,0 +1,99 @@
+{
+  "name": "GestorSala — Get Events",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "sala-eventos",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+              { "name": "Access-Control-Allow-Headers", "value": "Content-Type" }
+            ]
+          }
+        }
+      },
+      "id": "1a1a1a1a-1111-1111-1111-111111111111",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "sala-eventos"
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "c_36b4c6c75706ffff8b32d991f27c2ac8e0b338cfd8d2c580259d7e8fb02fd191@group.calendar.google.com",
+          "mode": "id"
+        },
+        "returnAll": false,
+        "limit": 50,
+        "options": {
+          "timeMin": "={{ $now.startOf('day').toISO() }}",
+          "timeMax": "={{ $now.plus({ days: 2 }).startOf('day').toISO() }}",
+          "singleEvents": true,
+          "orderBy": "startTime"
+        }
+      },
+      "id": "2b2b2b2b-2222-2222-2222-222222222222",
+      "name": "Google Calendar — Get Many",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [440, 300],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REEMPLAZAR_CREDENTIAL_ID",
+          "name": "Google Calendar"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normaliza eventos y los envuelve en UN solo item (garantiza que Respond corre)\nconst events = items.map(i => {\n  const ev = i.json;\n  return {\n    id: ev.id,\n    title: ev.summary || '(sin título)',\n    organizer:\n      (ev.organizer && (ev.organizer.displayName || ev.organizer.email)) || '',\n    start: (ev.start && (ev.start.dateTime || ev.start.date)) || null,\n    end:   (ev.end   && (ev.end.dateTime   || ev.end.date))   || null,\n  };\n}).filter(e => e.start && e.end);\n\nreturn [{ json: { events } }];\n"
+      },
+      "id": "3c3c3c3c-3333-3333-3333-333333333333",
+      "name": "Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Content-Type", "value": "application/json" }
+            ]
+          }
+        }
+      },
+      "id": "4d4d4d4d-4444-4444-4444-444444444444",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Google Calendar — Get Many", "type": "main", "index": 0 }]]
+    },
+    "Google Calendar — Get Many": {
+      "main": [[{ "node": "Normalize", "type": "main", "index": 0 }]]
+    },
+    "Normalize": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

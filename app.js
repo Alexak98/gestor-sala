@@ -1,0 +1,715 @@
+/* =========================================================
+ * GestorSala — Meeting room display
+ * =========================================================
+ * CONFIG: change these values when you connect n8n
+ * ========================================================= */
+const CONFIG = {
+  ROOM_NAME: "Sala Reuniones",
+
+  // n8n webhooks
+  N8N_GET_EVENTS_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-eventos",
+  N8N_CREATE_EVENT_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-reservar",
+  N8N_END_EVENT_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-finalizar",
+
+  // Refresh intervals
+  REFRESH_EVENTS_MS: 60_000, // re-fetch events every 60s
+  REFRESH_CLOCK_MS: 1_000,   // tick every second
+
+  // Locale
+  LOCALE: "es-ES",
+  TIMEZONE: "Europe/Madrid",
+
+  // Use mock data (true = mocks, false = real n8n)
+  USE_MOCK: false,
+
+  // Lista de personas que pueden reservar — EDITA AQUÍ
+  PEOPLE: [
+    "Alex",
+    "Alvaro Jareño",
+    "Luis Bahamonde",
+    "Miguel Vilata",
+    "Pedro Martin",
+    "Borja Pastor",
+    "Santiago Andres",
+    "Paula Schmidt",
+    "Aline Perles",
+    "Stefania Sulis",
+    "Javier Molina",
+    "Carlos Llopis",
+    "Raquel Batalla",
+    "Victor",
+    "Pablo Claramunt",
+    "Juan Daniel",
+    "Luis Alejandro",
+    "Edgar",
+    "Mercedes",
+    "Carlos Aparicio",
+    "Hugo Zalazar",
+    "Mario Labrandero",
+    "Ivan Ramirez",
+    "Rino Luigi",
+    "Javier Feliu",
+    "Rafael Gonzalez",
+    "Maria Fernandez",
+    "Marina Rubio",
+  ],
+};
+
+/* =========================================================
+ * Mock data (used while USE_MOCK = true)
+ * ========================================================= */
+function buildMockEvents() {
+  const now = new Date();
+  const today = new Date(now);
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const at = (d, h, m) => {
+    const x = new Date(d); x.setHours(h, m, 0, 0); return x.toISOString();
+  };
+
+  return [
+    {
+      id: "mock-1",
+      title: "Reunión de dirección",
+      organizer: "Alexander Stokes",
+      start: at(today, 13, 0),
+      end: at(today, 14, 0),
+    },
+    {
+      id: "mock-2",
+      title: "Entrevista con Sydney Roy",
+      organizer: "Henrietta Gardner",
+      start: at(today, 14, 15),
+      end: at(today, 15, 15),
+    },
+    {
+      id: "mock-3",
+      title: "Llamada comercial",
+      organizer: "Martin Gutierrez",
+      start: at(today, 15, 45),
+      end: at(today, 16, 45),
+    },
+    {
+      id: "mock-4",
+      title: "Planificación de proyecto",
+      organizer: "Susie Dunn",
+      start: at(tomorrow, 11, 0),
+      end: at(tomorrow, 12, 30),
+    },
+  ];
+}
+
+/* =========================================================
+ * API — calls n8n, or returns mocks
+ * ========================================================= */
+async function fetchEvents() {
+  if (CONFIG.USE_MOCK || !CONFIG.N8N_GET_EVENTS_URL) {
+    return buildMockEvents();
+  }
+  const res = await fetch(CONFIG.N8N_GET_EVENTS_URL, { method: "GET" });
+  if (!res.ok) throw new Error(`GET events ${res.status}`);
+  const raw = await res.json();
+  return normalizeEvents(raw);
+}
+
+async function createEvent({ title, startISO, endISO }) {
+  if (CONFIG.USE_MOCK || !CONFIG.N8N_CREATE_EVENT_URL) {
+    // Simulate
+    await new Promise(r => setTimeout(r, 600));
+    return { id: "mock-new", title, start: startISO, end: endISO, organizer: "Tú" };
+  }
+  const res = await fetch(CONFIG.N8N_CREATE_EVENT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, start: startISO, end: endISO }),
+  });
+  if (!res.ok) throw new Error(`POST create ${res.status}`);
+  return await res.json();
+}
+
+async function endEvent(eventId) {
+  if (CONFIG.USE_MOCK || !CONFIG.N8N_END_EVENT_URL) {
+    await new Promise(r => setTimeout(r, 500));
+    // Simulate: shorten mock event end to now
+    const ev = state.events.find(e => e.id === eventId);
+    if (ev) ev.end = new Date().toISOString();
+    return { id: eventId };
+  }
+  const res = await fetch(CONFIG.N8N_END_EVENT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ eventId }),
+  });
+  if (!res.ok) throw new Error(`POST end ${res.status}`);
+  return await res.json();
+}
+
+/**
+ * Normalize n8n response — supports either:
+ *  - { items: [ {id, summary, organizer:{displayName}, start:{dateTime}, end:{dateTime}}, ... ] } (raw Google Calendar)
+ *  - [ { id, title, organizer, start, end }, ... ] (already shaped)
+ */
+function normalizeEvents(raw) {
+  const items = Array.isArray(raw) ? raw : (raw.events || raw.items || raw.data || []);
+  return items.map(ev => ({
+    id: ev.id,
+    title: ev.title || ev.summary || "(sin título)",
+    organizer:
+      ev.organizer ||
+      ev.organizerName ||
+      (ev.organizer && ev.organizer.displayName) ||
+      (ev.creator && ev.creator.displayName) ||
+      "",
+    start: ev.start?.dateTime || ev.start?.date || ev.start,
+    end: ev.end?.dateTime || ev.end?.date || ev.end,
+  })).filter(ev => ev.start && ev.end);
+}
+
+/* =========================================================
+ * State
+ * ========================================================= */
+const state = {
+  events: [],
+  lastFetch: 0,
+  bookingDuration: 30,
+  bookingPerson: null,
+};
+
+/* =========================================================
+ * Clock
+ * ========================================================= */
+function tickClock() {
+  const now = new Date();
+  const time = now.toLocaleTimeString(CONFIG.LOCALE, {
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const date = now.toLocaleDateString(CONFIG.LOCALE, {
+    weekday: "long", day: "numeric", month: "long",
+  });
+  document.getElementById("clock-time").textContent = time;
+  document.getElementById("clock-date").textContent = capitalize(date);
+
+  // Re-render status every tick (cheap) to keep countdown fresh
+  renderStatus();
+}
+
+function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+/* =========================================================
+ * Status panel rendering
+ * ========================================================= */
+function getCurrentEvent(now = new Date()) {
+  return state.events.find(ev => {
+    const s = new Date(ev.start), e = new Date(ev.end);
+    return s <= now && now < e;
+  }) || null;
+}
+
+function getNextEvent(now = new Date()) {
+  return state.events
+    .filter(ev => new Date(ev.start) > now)
+    .sort((a, b) => new Date(a.start) - new Date(b.start))[0] || null;
+}
+
+function renderStatus() {
+  const now = new Date();
+  const current = getCurrentEvent(now);
+  const next = getNextEvent(now);
+  const app = document.getElementById("app");
+  const statusLabel = document.getElementById("status-label");
+  const statusSublabel = document.getElementById("status-sublabel");
+  const progressBar = document.getElementById("progress-bar");
+  const progressFill = document.getElementById("progress-bar-fill");
+
+  if (current) {
+    app.dataset.status = "booked";
+    statusLabel.textContent = "OCUPADA";
+    statusSublabel.textContent = `Hasta las ${fmtTime(current.end)}`;
+
+    // Countdown
+    const endMs = new Date(current.end).getTime();
+    const remaining = Math.max(0, endMs - now.getTime());
+    const mm = String(Math.floor(remaining / 60000)).padStart(2, "0");
+    const ss = String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0");
+    document.getElementById("countdown-time").textContent = `${mm}:${ss}`;
+
+    // Progress bar (elapsed)
+    const totalMs = new Date(current.end) - new Date(current.start);
+    const pct = totalMs > 0 ? Math.min(1, 1 - remaining / totalMs) : 0;
+    progressFill.style.width = `${pct * 100}%`;
+    progressBar.hidden = false;
+
+    document.getElementById("booked-info").hidden = false;
+    document.getElementById("booked-title").textContent = current.title;
+    document.getElementById("booked-organizer").textContent =
+      current.organizer ? `Organiza ${current.organizer}` : "";
+  } else {
+    app.dataset.status = "free";
+    statusLabel.textContent = "LIBRE";
+    progressBar.hidden = true;
+
+    if (next && isSameDay(new Date(next.start), now)) {
+      const mins = Math.round((new Date(next.start) - now) / 60000);
+      if (mins <= 60) {
+        statusSublabel.textContent = `Próxima reunión en ${mins} min`;
+      } else {
+        statusSublabel.textContent = `Libre hasta las ${fmtTime(next.start)}`;
+      }
+    } else {
+      statusSublabel.textContent = "Sin reuniones programadas hoy";
+    }
+
+    document.getElementById("booked-info").hidden = true;
+  }
+}
+
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
+/* =========================================================
+ * Events list rendering
+ * ========================================================= */
+function renderEventsList() {
+  const list = document.getElementById("events-list");
+  const now = new Date();
+
+  if (!state.events.length) {
+    list.innerHTML = `<div class="events-empty">No hay eventos próximos</div>`;
+    return;
+  }
+
+  const today = dayKey(now);
+  const tomorrow = dayKey(new Date(now.getTime() + 86_400_000));
+
+  const groups = new Map();
+  for (const ev of state.events) {
+    const k = dayKey(new Date(ev.start));
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(ev);
+  }
+
+  const sortedKeys = [...groups.keys()].sort();
+  const html = sortedKeys.map(key => {
+    let header;
+    if (key === today) header = "HOY";
+    else if (key === tomorrow) header = "MAÑANA";
+    else header = groupHeaderFromKey(key);
+
+    const items = groups.get(key)
+      .sort((a, b) => new Date(a.start) - new Date(b.start))
+      .map(ev => renderEventItem(ev, now))
+      .join("");
+
+    return `<div class="events-group-header">${escapeHtml(header)}</div>${items}`;
+  }).join("");
+
+  list.innerHTML = html;
+}
+
+function renderEventItem(ev, now) {
+  const s = new Date(ev.start), e = new Date(ev.end);
+  const isCurrent = s <= now && now < e;
+  const timeFmt = { hour: "2-digit", minute: "2-digit", hour12: false };
+  const sStr = s.toLocaleTimeString(CONFIG.LOCALE, timeFmt);
+  const eStr = e.toLocaleTimeString(CONFIG.LOCALE, timeFmt);
+
+  return `
+    <div class="event-item ${isCurrent ? "event-item--current" : ""}">
+      <div class="event-time">
+        <span>${sStr}</span>
+        <span class="event-time-arrow">→</span>
+        <span>${eStr}</span>
+      </div>
+      <div class="event-title">${escapeHtml(ev.title)}</div>
+      ${ev.organizer ? `<div class="event-organizer">${escapeHtml(ev.organizer)}</div>` : ""}
+    </div>
+  `;
+}
+
+function dayKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function groupHeaderFromKey(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.toLocaleDateString(CONFIG.LOCALE, {
+    weekday: "long", day: "numeric", month: "long",
+  }).toUpperCase();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+/* =========================================================
+ * Modal — book a meeting
+ * ========================================================= */
+const modal = {
+  open() {
+    document.getElementById("modal").hidden = false;
+    document.getElementById("book-title").focus();
+    document.getElementById("modal-error").hidden = true;
+    mountPeoplePicker("people-picker", {
+      selectable: true,
+      onPick: (name) => {
+        state.bookingPerson = name;
+      },
+    });
+  },
+  close() {
+    document.getElementById("modal").hidden = true;
+    document.getElementById("book-title").value = "";
+    state.bookingPerson = null;
+  },
+  showError(msg) {
+    const el = document.getElementById("modal-error");
+    el.textContent = msg;
+    el.hidden = false;
+  },
+};
+
+/* =========================================================
+ * "Who's booking" selector (quick-book flow)
+ * ========================================================= */
+const whoModal = {
+  open(mins) {
+    state.bookingDuration = mins;
+    const label = mins === 60 ? "1 hora" : `${mins} min`;
+    document.getElementById("who-modal-text").textContent = `Reserva rápida de ${label}`;
+    mountPeoplePicker("who-people-picker", {
+      selectable: false,
+      onPick: async (name) => {
+        whoModal.close();
+        await quickBook(name);
+      },
+    });
+    document.getElementById("who-modal").hidden = false;
+  },
+  close() {
+    document.getElementById("who-modal").hidden = true;
+  },
+};
+
+/**
+ * Renders a full people picker: search box + initial-letter filter + grid.
+ * options.selectable — if true, keeps the selected button highlighted.
+ */
+function mountPeoplePicker(containerId, { selectable, onPick }) {
+  const host = document.getElementById(containerId);
+  host.innerHTML = "";
+
+  const people = [...CONFIG.PEOPLE].map(s => s.trim()).filter(Boolean);
+  const initials = [...new Set(people.map(n => n[0].toUpperCase()))].sort();
+
+  // Search input
+  const search = document.createElement("input");
+  search.type = "text";
+  search.className = "people-search";
+  search.placeholder = "Buscar por nombre…";
+  host.appendChild(search);
+
+  // Initials row
+  const initialsRow = document.createElement("div");
+  initialsRow.className = "people-initials";
+  const allBtn = document.createElement("button");
+  allBtn.type = "button";
+  allBtn.textContent = "Todos";
+  allBtn.style.width = "auto";
+  allBtn.style.padding = "0 10px";
+  allBtn.classList.add("active");
+  allBtn.dataset.letter = "";
+  initialsRow.appendChild(allBtn);
+  for (const letter of initials) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = letter;
+    b.dataset.letter = letter;
+    initialsRow.appendChild(b);
+  }
+  host.appendChild(initialsRow);
+
+  // Grid
+  const grid = document.createElement("div");
+  grid.className = "people-grid";
+  host.appendChild(grid);
+
+  let activeLetter = "";
+  let activeQuery = "";
+  let selected = null;
+
+  function render() {
+    grid.innerHTML = "";
+    const q = activeQuery.toLowerCase();
+    const filtered = people.filter(n => {
+      if (activeLetter && !n.toUpperCase().startsWith(activeLetter)) return false;
+      if (q && !n.toLowerCase().includes(q)) return false;
+      return true;
+    });
+    if (!filtered.length) {
+      const empty = document.createElement("div");
+      empty.className = "people-empty";
+      empty.textContent = "Sin resultados";
+      grid.appendChild(empty);
+      return;
+    }
+    for (const name of filtered) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = name;
+      b.dataset.person = name;
+      if (selectable && selected === name) b.classList.add("selected");
+      b.addEventListener("click", () => {
+        if (selectable) {
+          selected = name;
+          grid.querySelectorAll("button").forEach(x =>
+            x.classList.toggle("selected", x.dataset.person === name)
+          );
+        }
+        onPick(name);
+      });
+      grid.appendChild(b);
+    }
+  }
+
+  search.addEventListener("input", (e) => {
+    activeQuery = e.target.value;
+    render();
+  });
+
+  initialsRow.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-letter]");
+    if (!btn) return;
+    activeLetter = btn.dataset.letter;
+    initialsRow.querySelectorAll("button").forEach(b =>
+      b.classList.toggle("active", b === btn)
+    );
+    render();
+  });
+
+  render();
+}
+
+async function handleBookConfirm() {
+  if (!state.bookingPerson) {
+    modal.showError("Selecciona quién reserva");
+    return;
+  }
+  const titleInput = document.getElementById("book-title");
+  const baseTitle = titleInput.value.trim() || "Reunión rápida";
+  const title = `${baseTitle} — ${state.bookingPerson}`;
+  const mins = state.bookingDuration;
+
+  const now = new Date();
+  const start = new Date(now);
+  start.setSeconds(0, 0);
+  const end = new Date(start.getTime() + mins * 60_000);
+
+  const conflict = findConflict(start, end);
+  if (conflict) {
+    modal.showError(`Se solapa con "${conflict.title}" (${fmtTime(conflict.start)}–${fmtTime(conflict.end)})`);
+    return;
+  }
+
+  const btn = document.getElementById("confirm-book");
+  btn.disabled = true;
+  btn.textContent = "Creando…";
+
+  try {
+    await createEvent({ title, startISO: start.toISOString(), endISO: end.toISOString() });
+    modal.close();
+    toast("Reunión creada", "success");
+    await loadEvents();
+  } catch (err) {
+    modal.showError("No se pudo crear la reunión. Reintenta.");
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Confirmar";
+  }
+}
+
+function findConflict(start, end) {
+  return state.events.find(ev => {
+    const s = new Date(ev.start), e = new Date(ev.end);
+    return s < end && start < e;
+  });
+}
+
+async function quickBook(person) {
+  const mins = state.bookingDuration;
+  const now = new Date();
+  const start = new Date(now); start.setSeconds(0, 0);
+  const end = new Date(start.getTime() + mins * 60_000);
+
+  const conflict = findConflict(start, end);
+  if (conflict) {
+    toast(`Se solaparía con "${conflict.title}"`, "error");
+    return;
+  }
+
+  const title = `Reunión rápida — ${person}`;
+  toast("Reservando…");
+  try {
+    await createEvent({ title, startISO: start.toISOString(), endISO: end.toISOString() });
+    toast(`Reservado ${mins} min — ${person}`, "success");
+    await loadEvents();
+  } catch (err) {
+    toast("No se pudo reservar", "error");
+    console.error(err);
+  }
+}
+
+/* =========================================================
+ * Modal — end current meeting
+ * ========================================================= */
+const endModal = {
+  open() {
+    const current = getCurrentEvent();
+    if (!current) return;
+    const txt = `Se finalizará "${current.title}" ahora mismo, liberando la sala.`;
+    document.getElementById("end-modal-text").textContent = txt;
+    document.getElementById("end-modal-error").hidden = true;
+    document.getElementById("end-modal").hidden = false;
+  },
+  close() {
+    document.getElementById("end-modal").hidden = true;
+  },
+  showError(msg) {
+    const el = document.getElementById("end-modal-error");
+    el.textContent = msg;
+    el.hidden = false;
+  },
+};
+
+async function handleEndConfirm() {
+  const current = getCurrentEvent();
+  if (!current) { endModal.close(); return; }
+
+  const btn = document.getElementById("confirm-end");
+  btn.disabled = true;
+  btn.textContent = "Finalizando…";
+
+  try {
+    await endEvent(current.id);
+    endModal.close();
+    toast("Reunión finalizada", "success");
+    await loadEvents();
+  } catch (err) {
+    endModal.showError("No se pudo finalizar. Reintenta.");
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Sí, finalizar";
+  }
+}
+
+function fmtTime(iso) {
+  return new Date(iso).toLocaleTimeString(CONFIG.LOCALE, {
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
+/* =========================================================
+ * Toast
+ * ========================================================= */
+let toastTimer = null;
+function toast(msg, kind = "") {
+  const el = document.getElementById("toast");
+  el.className = "toast" + (kind ? ` toast--${kind}` : "");
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 2400);
+}
+
+/* =========================================================
+ * Data loading
+ * ========================================================= */
+async function loadEvents() {
+  try {
+    const events = await fetchEvents();
+    state.events = events;
+    state.lastFetch = Date.now();
+    renderEventsList();
+    renderStatus();
+  } catch (err) {
+    console.error("Error cargando eventos:", err);
+    toast("Error cargando eventos", "error");
+  }
+}
+
+/* =========================================================
+ * Init
+ * ========================================================= */
+function init() {
+  document.getElementById("room-name").textContent = CONFIG.ROOM_NAME;
+
+  // Clock + periodic re-render
+  tickClock();
+  setInterval(tickClock, CONFIG.REFRESH_CLOCK_MS);
+
+  // Events fetch loop
+  loadEvents();
+  setInterval(loadEvents, CONFIG.REFRESH_EVENTS_MS);
+
+  // Quick booking buttons (15/30/60 min) → ask who first
+  document.querySelectorAll("[data-quick-mins]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      whoModal.open(Number(btn.dataset.quickMins));
+    });
+  });
+
+  // "Otra duración" → open custom modal
+  document.getElementById("quick-custom").addEventListener("click", () => modal.open());
+
+  // Who modal close handlers
+  document.querySelectorAll("[data-who-close]").forEach(el => {
+    el.addEventListener("click", () => whoModal.close());
+  });
+
+  // Modal — close handlers
+  document.querySelectorAll("[data-close]").forEach(el => {
+    el.addEventListener("click", () => modal.close());
+  });
+
+  // Duration selector
+  const durWrap = document.getElementById("duration-options");
+  durWrap.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-mins]");
+    if (!btn) return;
+    durWrap.querySelectorAll("button").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+    state.bookingDuration = Number(btn.dataset.mins);
+  });
+
+  // Confirm booking
+  document.getElementById("confirm-book").addEventListener("click", handleBookConfirm);
+
+  // End meeting button
+  document.getElementById("end-btn").addEventListener("click", () => endModal.open());
+  document.querySelectorAll("[data-end-close]").forEach(el => {
+    el.addEventListener("click", () => endModal.close());
+  });
+  document.getElementById("confirm-end").addEventListener("click", handleEndConfirm);
+
+  // Keyboard: Esc closes modals
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { modal.close(); endModal.close(); whoModal.close(); }
+  });
+
+  // Prevent tablet screen sleep hint (needs user interaction on most browsers)
+  if ("wakeLock" in navigator) {
+    document.addEventListener("click", async function requestWakeOnce() {
+      try { await navigator.wakeLock.request("screen"); } catch (_) {}
+      document.removeEventListener("click", requestWakeOnce);
+    });
+  }
+}
+
+document.addEventListener("DOMContentLoaded", init);
