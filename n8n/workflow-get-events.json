@@ -36,7 +36,7 @@
         "limit": 50,
         "options": {
           "timeMin": "={{ $now.startOf('day').toISO() }}",
-          "timeMax": "={{ $now.plus({ days: 2 }).startOf('day').toISO() }}",
+          "timeMax": "={{ $now.plus({ days: 14 }).startOf('day').toISO() }}",
           "singleEvents": true,
           "orderBy": "startTime"
         }

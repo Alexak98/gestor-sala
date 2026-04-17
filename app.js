@@ -276,7 +276,10 @@ function renderEventsList() {
   const list = document.getElementById("events-list");
   const now = new Date();
 
-  if (!state.events.length) {
+  // Hide past events (end already passed)
+  const visible = state.events.filter(ev => new Date(ev.end) > now);
+
+  if (!visible.length) {
     list.innerHTML = `<div class="events-empty">No hay eventos próximos</div>`;
     return;
   }
@@ -285,7 +288,7 @@ function renderEventsList() {
   const tomorrow = dayKey(new Date(now.getTime() + 86_400_000));
 
   const groups = new Map();
-  for (const ev of state.events) {
+  for (const ev of visible) {
     const k = dayKey(new Date(ev.start));
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(ev);
@@ -355,6 +358,14 @@ const modal = {
     document.getElementById("modal").hidden = false;
     document.getElementById("book-title").focus();
     document.getElementById("modal-error").hidden = true;
+
+    // Default date = today, time = next 15-min slot
+    const now = new Date();
+    const rounded = new Date(now);
+    rounded.setMinutes(Math.ceil(rounded.getMinutes() / 15) * 15, 0, 0);
+    setSelectedDate(rounded);
+    document.getElementById("book-time").value = toTimeInput(rounded);
+
     mountPeoplePicker("people-picker", {
       selectable: true,
       onPick: (name) => {
@@ -374,6 +385,93 @@ const modal = {
   },
 };
 
+function toDateInput(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function toTimeInput(d) {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/* =========================================================
+ * Custom calendar date picker (tablet-friendly)
+ * ========================================================= */
+const calState = {
+  selected: null,    // Date (day resolution)
+  viewMonth: null,   // Date (first day of viewed month)
+};
+
+function setSelectedDate(d) {
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  calState.selected = day;
+  calState.viewMonth = new Date(day.getFullYear(), day.getMonth(), 1);
+  const label = day.toLocaleDateString(CONFIG.LOCALE, {
+    weekday: "long", day: "numeric", month: "long",
+  });
+  document.getElementById("book-date-label").textContent = capitalize(label);
+}
+
+function getSelectedDateValue() {
+  return calState.selected ? toDateInput(calState.selected) : "";
+}
+
+const dateModal = {
+  open() {
+    if (!calState.viewMonth) calState.viewMonth = new Date();
+    if (!calState.selected) calState.selected = new Date();
+    renderCalendar();
+    document.getElementById("date-modal").hidden = false;
+  },
+  close() {
+    document.getElementById("date-modal").hidden = true;
+  },
+};
+
+function renderCalendar() {
+  const view = calState.viewMonth;
+  const title = view.toLocaleDateString(CONFIG.LOCALE, { month: "long", year: "numeric" });
+  document.getElementById("cal-title").textContent = capitalize(title);
+
+  const grid = document.getElementById("cal-grid");
+  grid.innerHTML = "";
+
+  const y = view.getFullYear();
+  const m = view.getMonth();
+  const firstOfMonth = new Date(y, m, 1);
+  // Monday-first: getDay() Sun=0..Sat=6 → (dow+6)%7 gives Mon=0..Sun=6
+  const leading = (firstOfMonth.getDay() + 6) % 7;
+  const start = new Date(y, m, 1 - leading);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cal-day";
+    btn.textContent = String(d.getDate());
+
+    if (d.getMonth() !== m) btn.classList.add("cal-day--muted");
+    if (sameDay(d, today)) btn.classList.add("cal-day--today");
+    if (calState.selected && sameDay(d, calState.selected)) btn.classList.add("cal-day--selected");
+    if (d < today) btn.disabled = true;
+
+    btn.addEventListener("click", () => {
+      setSelectedDate(d);
+      renderCalendar();
+      dateModal.close();
+    });
+
+    grid.appendChild(btn);
+  }
+}
+
+function sameDay(a, b) {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
 /* =========================================================
  * "Who's booking" selector (quick-book flow)
  * ========================================================= */
@@ -384,9 +482,9 @@ const whoModal = {
     document.getElementById("who-modal-text").textContent = `Reserva rápida de ${label}`;
     mountPeoplePicker("who-people-picker", {
       selectable: false,
-      onPick: async (name) => {
+      onPick: (name) => {
         whoModal.close();
-        await quickBook(name);
+        titleModal.open(name);
       },
     });
     document.getElementById("who-modal").hidden = false;
@@ -395,6 +493,54 @@ const whoModal = {
     document.getElementById("who-modal").hidden = true;
   },
 };
+
+/* =========================================================
+ * Title modal — asks for meeting title after duration + person
+ * ========================================================= */
+const titleModal = {
+  open(person) {
+    state.bookingPerson = person;
+    const mins = state.bookingDuration;
+    const label = mins === 60 ? "1 hora" : `${mins} min`;
+    document.getElementById("title-modal-text").textContent =
+      `${person} · ${label}`;
+    const input = document.getElementById("quick-title-input");
+    input.value = "";
+    document.getElementById("title-modal-error").hidden = true;
+    document.getElementById("title-modal").hidden = false;
+    setTimeout(() => input.focus(), 50);
+  },
+  close() {
+    document.getElementById("title-modal").hidden = true;
+    state.bookingPerson = null;
+  },
+  showError(msg) {
+    const el = document.getElementById("title-modal-error");
+    el.textContent = msg;
+    el.hidden = false;
+  },
+};
+
+async function handleTitleConfirm() {
+  const person = state.bookingPerson;
+  if (!person) { titleModal.close(); return; }
+  const input = document.getElementById("quick-title-input");
+  const baseTitle = input.value.trim() || "Reunión rápida";
+
+  const btn = document.getElementById("confirm-title");
+  btn.disabled = true;
+  btn.textContent = "Reservando…";
+  try {
+    await quickBookWithTitle(baseTitle, person);
+    titleModal.close();
+  } catch (err) {
+    titleModal.showError("No se pudo reservar. Reintenta.");
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Reservar";
+  }
+}
 
 /**
  * Renders a full people picker: search box + initial-letter filter + grid.
@@ -505,14 +651,26 @@ async function handleBookConfirm() {
   const title = `${baseTitle} — ${state.bookingPerson}`;
   const mins = state.bookingDuration;
 
-  const now = new Date();
-  const start = new Date(now);
-  start.setSeconds(0, 0);
+  const dateStr = getSelectedDateValue();
+  const timeStr = document.getElementById("book-time").value;
+  if (!dateStr || !timeStr) {
+    modal.showError("Selecciona fecha y hora");
+    return;
+  }
+  const [y, mo, d] = dateStr.split("-").map(Number);
+  const [h, mi] = timeStr.split(":").map(Number);
+  const start = new Date(y, mo - 1, d, h, mi, 0, 0);
+
+  if (start.getTime() < Date.now() - 60_000) {
+    modal.showError("No se puede reservar en el pasado");
+    return;
+  }
+
   const end = new Date(start.getTime() + mins * 60_000);
 
   const conflict = findConflict(start, end);
   if (conflict) {
-    modal.showError(`Se solapa con "${conflict.title}" (${fmtTime(conflict.start)}–${fmtTime(conflict.end)})`);
+    modal.showError(`Se solapa con "${conflict.title}" (${fmtDateTime(conflict.start)}–${fmtTime(conflict.end)})`);
     return;
   }
 
@@ -541,7 +699,7 @@ function findConflict(start, end) {
   });
 }
 
-async function quickBook(person) {
+async function quickBookWithTitle(baseTitle, person) {
   const mins = state.bookingDuration;
   const now = new Date();
   const start = new Date(now); start.setSeconds(0, 0);
@@ -549,20 +707,13 @@ async function quickBook(person) {
 
   const conflict = findConflict(start, end);
   if (conflict) {
-    toast(`Se solaparía con "${conflict.title}"`, "error");
-    return;
+    throw new Error(`Conflict with "${conflict.title}"`);
   }
 
-  const title = `Reunión rápida — ${person}`;
-  toast("Reservando…");
-  try {
-    await createEvent({ title, startISO: start.toISOString(), endISO: end.toISOString() });
-    toast(`Reservado ${mins} min — ${person}`, "success");
-    await loadEvents();
-  } catch (err) {
-    toast("No se pudo reservar", "error");
-    console.error(err);
-  }
+  const title = `${baseTitle} — ${person}`;
+  await createEvent({ title, startISO: start.toISOString(), endISO: end.toISOString() });
+  toast(`Reservado ${mins} min — ${person}`, "success");
+  await loadEvents();
 }
 
 /* =========================================================
@@ -613,6 +764,12 @@ function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString(CONFIG.LOCALE, {
     hour: "2-digit", minute: "2-digit", hour12: false,
   });
+}
+
+function fmtDateTime(iso) {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString(CONFIG.LOCALE, { day: "numeric", month: "short" });
+  return `${date} ${fmtTime(iso)}`;
 }
 
 /* =========================================================
@@ -673,6 +830,36 @@ function init() {
     el.addEventListener("click", () => whoModal.close());
   });
 
+  // Date picker
+  document.getElementById("book-date-trigger").addEventListener("click", () => dateModal.open());
+  document.querySelectorAll("[data-date-close]").forEach(el => {
+    el.addEventListener("click", () => dateModal.close());
+  });
+  document.getElementById("cal-prev").addEventListener("click", () => {
+    const v = calState.viewMonth;
+    calState.viewMonth = new Date(v.getFullYear(), v.getMonth() - 1, 1);
+    renderCalendar();
+  });
+  document.getElementById("cal-next").addEventListener("click", () => {
+    const v = calState.viewMonth;
+    calState.viewMonth = new Date(v.getFullYear(), v.getMonth() + 1, 1);
+    renderCalendar();
+  });
+  document.getElementById("cal-today-btn").addEventListener("click", () => {
+    setSelectedDate(new Date());
+    renderCalendar();
+    dateModal.close();
+  });
+
+  // Title modal — close + confirm + Enter key
+  document.querySelectorAll("[data-title-close]").forEach(el => {
+    el.addEventListener("click", () => titleModal.close());
+  });
+  document.getElementById("confirm-title").addEventListener("click", handleTitleConfirm);
+  document.getElementById("quick-title-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") handleTitleConfirm();
+  });
+
   // Modal — close handlers
   document.querySelectorAll("[data-close]").forEach(el => {
     el.addEventListener("click", () => modal.close());
@@ -700,7 +887,7 @@ function init() {
 
   // Keyboard: Esc closes modals
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { modal.close(); endModal.close(); whoModal.close(); }
+    if (e.key === "Escape") { modal.close(); endModal.close(); whoModal.close(); titleModal.close(); dateModal.close(); }
   });
 
   // Prevent tablet screen sleep hint (needs user interaction on most browsers)

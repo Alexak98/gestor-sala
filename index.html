@@ -93,7 +93,7 @@
     <!-- Modal: custom book -->
     <div class="modal" id="modal" hidden>
       <div class="modal-backdrop" data-close></div>
-      <div class="modal-panel">
+      <div class="modal-panel modal-panel--wide">
         <h2 class="modal-title">Reservar sala</h2>
         <label class="modal-field">
           <span>Título de la reunión</span>
@@ -102,6 +102,24 @@
         <div class="modal-field">
           <span>¿Quién reserva?</span>
           <div class="people-picker" id="people-picker"></div>
+        </div>
+        <div class="modal-row">
+          <div class="modal-field">
+            <span>Fecha</span>
+            <button type="button" class="date-trigger" id="book-date-trigger">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <line x1="16" y1="3" x2="16" y2="7" />
+                <line x1="8" y1="3" x2="8" y2="7" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+              <span id="book-date-label">—</span>
+            </button>
+          </div>
+          <label class="modal-field">
+            <span>Hora de inicio</span>
+            <input type="time" id="book-time" step="900" />
+          </label>
         </div>
         <div class="modal-field">
           <span>Duración</span>
@@ -135,6 +153,24 @@
       </div>
     </div>
 
+    <!-- Modal: quick title (after duration + person) -->
+    <div class="modal" id="title-modal" hidden>
+      <div class="modal-backdrop" data-title-close></div>
+      <div class="modal-panel">
+        <h2 class="modal-title">Título de la reunión</h2>
+        <p class="modal-text" id="title-modal-text">—</p>
+        <label class="modal-field">
+          <span>¿De qué trata?</span>
+          <input type="text" id="quick-title-input" placeholder="Reunión rápida" autocomplete="off" />
+        </label>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" data-title-close>Cancelar</button>
+          <button class="btn btn-primary" id="confirm-title">Reservar</button>
+        </div>
+        <div class="modal-error" id="title-modal-error" hidden></div>
+      </div>
+    </div>
+
     <!-- Modal: confirm end -->
     <div class="modal" id="end-modal" hidden>
       <div class="modal-backdrop" data-end-close></div>
@@ -146,6 +182,34 @@
           <button class="btn btn-danger" id="confirm-end">Sí, finalizar</button>
         </div>
         <div class="modal-error" id="end-modal-error" hidden></div>
+      </div>
+    </div>
+
+    <!-- Date picker (tablet-friendly calendar) -->
+    <div class="modal" id="date-modal" hidden>
+      <div class="modal-backdrop" data-date-close></div>
+      <div class="modal-panel modal-panel--cal">
+        <div class="cal-header">
+          <button type="button" class="cal-nav" id="cal-prev" aria-label="Mes anterior">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <polyline points="15 6 9 12 15 18" />
+            </svg>
+          </button>
+          <div class="cal-title" id="cal-title">—</div>
+          <button type="button" class="cal-nav" id="cal-next" aria-label="Mes siguiente">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <polyline points="9 6 15 12 9 18" />
+            </svg>
+          </button>
+        </div>
+        <div class="cal-weekdays">
+          <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
+        </div>
+        <div class="cal-grid" id="cal-grid"></div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" id="cal-today-btn" type="button">Hoy</button>
+          <button class="btn btn-secondary" data-date-close>Cancelar</button>
+        </div>
       </div>
     </div>
 
