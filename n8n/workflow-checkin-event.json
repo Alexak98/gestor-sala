@@ -1,10 +1,10 @@
 {
-  "name": "GestorSala — Get Events",
+  "name": "GestorSala — Check-in Event",
   "nodes": [
     {
       "parameters": {
-        "httpMethod": "GET",
-        "path": "sala-eventos",
+        "httpMethod": "POST",
+        "path": "sala-checkin",
         "responseMode": "responseNode",
         "options": {
           "responseHeaders": {
@@ -16,33 +16,26 @@
           }
         }
       },
-      "id": "1a1a1a1a-1111-1111-1111-111111111111",
+      "id": "1f1f1f1f-ffff-ffff-ffff-111111111111",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [200, 300],
-      "webhookId": "sala-eventos"
+      "webhookId": "sala-checkin"
     },
     {
       "parameters": {
         "resource": "event",
-        "operation": "getAll",
+        "operation": "get",
         "calendar": {
           "__rl": true,
           "value": "c_36b4c6c75706ffff8b32d991f27c2ac8e0b338cfd8d2c580259d7e8fb02fd191@group.calendar.google.com",
           "mode": "id"
         },
-        "returnAll": false,
-        "limit": 50,
-        "options": {
-          "timeMin": "={{ $now.startOf('day').toISO() }}",
-          "timeMax": "={{ $now.plus({ days: 14 }).startOf('day').toISO() }}",
-          "singleEvents": true,
-          "orderBy": "startTime"
-        }
+        "eventId": "={{ $json.body.eventId }}"
       },
-      "id": "2b2b2b2b-2222-2222-2222-222222222222",
-      "name": "Google Calendar — Get Many",
+      "id": "2f2f2f2f-ffff-ffff-ffff-222222222222",
+      "name": "Google Calendar — Get",
       "type": "n8n-nodes-base.googleCalendar",
       "typeVersion": 1,
       "position": [440, 300],
@@ -55,13 +48,29 @@
     },
     {
       "parameters": {
-        "jsCode": "// Normaliza eventos y los envuelve en UN solo item (garantiza que Respond corre)\nconst events = items.map(i => {\n  const ev = i.json;\n  return {\n    id: ev.id,\n    title: ev.summary || '(sin título)',\n    organizer:\n      (ev.organizer && (ev.organizer.displayName || ev.organizer.email)) || '',\n    start: (ev.start && (ev.start.dateTime || ev.start.date)) || null,\n    end:   (ev.end   && (ev.end.dateTime   || ev.end.date))   || null,\n    description: ev.description || '',\n  };\n}).filter(e => e.start && e.end);\n\nreturn [{ json: { events } }];\n"
+        "resource": "event",
+        "operation": "update",
+        "calendar": {
+          "__rl": true,
+          "value": "c_36b4c6c75706ffff8b32d991f27c2ac8e0b338cfd8d2c580259d7e8fb02fd191@group.calendar.google.com",
+          "mode": "id"
+        },
+        "eventId": "={{ $json.id }}",
+        "updateFields": {
+          "description": "={{ '[CHECKED_IN:' + $now.toISO() + ']\\n\\n' + ($json.description || '') }}"
+        }
       },
-      "id": "3c3c3c3c-3333-3333-3333-333333333333",
-      "name": "Normalize",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [680, 300]
+      "id": "3f3f3f3f-ffff-ffff-ffff-333333333333",
+      "name": "Google Calendar — Update",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "REEMPLAZAR_CREDENTIAL_ID",
+          "name": "Google Calendar"
+        }
+      }
     },
     {
       "parameters": {
@@ -75,7 +84,7 @@
           }
         }
       },
-      "id": "4d4d4d4d-4444-4444-4444-444444444444",
+      "id": "4f4f4f4f-ffff-ffff-ffff-444444444444",
       "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
@@ -84,12 +93,12 @@
   ],
   "connections": {
     "Webhook": {
-      "main": [[{ "node": "Google Calendar — Get Many", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Google Calendar — Get", "type": "main", "index": 0 }]]
     },
-    "Google Calendar — Get Many": {
-      "main": [[{ "node": "Normalize", "type": "main", "index": 0 }]]
+    "Google Calendar — Get": {
+      "main": [[{ "node": "Google Calendar — Update", "type": "main", "index": 0 }]]
     },
-    "Normalize": {
+    "Google Calendar — Update": {
       "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
     }
   },

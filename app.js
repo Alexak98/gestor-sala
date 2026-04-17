@@ -10,6 +10,11 @@ const CONFIG = {
   N8N_GET_EVENTS_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-eventos",
   N8N_CREATE_EVENT_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-reservar",
   N8N_END_EVENT_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-finalizar",
+  N8N_CHECKIN_URL:   "https://n8n-soporte.data.yurest.dev/webhook/sala-checkin",
+
+  // Check-in window (minutes): si no se confirma dentro de este tiempo
+  // desde el inicio del evento, se cancela automáticamente
+  CHECKIN_WINDOW_MIN: 15,
 
   // Refresh intervals
   REFRESH_EVENTS_MS: 60_000, // re-fetch events every 60s
@@ -127,6 +132,22 @@ async function createEvent({ title, startISO, endISO }) {
   return await res.json();
 }
 
+async function checkInEvent(eventId) {
+  if (CONFIG.USE_MOCK || !CONFIG.N8N_CHECKIN_URL) {
+    await new Promise(r => setTimeout(r, 400));
+    const ev = state.events.find(e => e.id === eventId);
+    if (ev) ev.description = `[CHECKED_IN:${new Date().toISOString()}]\n\n${ev.description || ""}`;
+    return { id: eventId };
+  }
+  const res = await fetch(CONFIG.N8N_CHECKIN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ eventId }),
+  });
+  if (!res.ok) throw new Error(`POST checkin ${res.status}`);
+  return await res.json();
+}
+
 async function endEvent(eventId) {
   if (CONFIG.USE_MOCK || !CONFIG.N8N_END_EVENT_URL) {
     await new Promise(r => setTimeout(r, 500));
@@ -162,7 +183,12 @@ function normalizeEvents(raw) {
       "",
     start: ev.start?.dateTime || ev.start?.date || ev.start,
     end: ev.end?.dateTime || ev.end?.date || ev.end,
+    description: ev.description || "",
   })).filter(ev => ev.start && ev.end);
+}
+
+function isCheckedIn(ev) {
+  return /\[CHECKED_IN:/i.test(ev?.description || "");
 }
 
 /* =========================================================
@@ -173,11 +199,14 @@ const state = {
   lastFetch: 0,
   bookingDuration: 30,
   bookingPerson: null,
+  autoCancelled: new Set(), // event IDs already auto-cancelled this session
+  checkingIn: false,
 };
 
 /* =========================================================
  * Clock
  * ========================================================= */
+let lastListMinute = -1;
 function tickClock() {
   const now = new Date();
   const time = now.toLocaleTimeString(CONFIG.LOCALE, {
@@ -191,6 +220,13 @@ function tickClock() {
 
   // Re-render status every tick (cheap) to keep countdown fresh
   renderStatus();
+
+  // Re-render the event list once per minute to drop just-ended events
+  const mKey = now.getHours() * 60 + now.getMinutes();
+  if (mKey !== lastListMinute) {
+    lastListMinute = mKey;
+    renderEventsList();
+  }
 }
 
 function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
@@ -243,6 +279,9 @@ function renderStatus() {
     document.getElementById("booked-title").textContent = current.title;
     document.getElementById("booked-organizer").textContent =
       current.organizer ? `Organiza ${current.organizer}` : "";
+
+    // Check-in / auto-cancel logic
+    handleCheckinState(current, now);
   } else {
     app.dataset.status = "free";
     statusLabel.textContent = "LIBRE";
@@ -260,6 +299,79 @@ function renderStatus() {
     }
 
     document.getElementById("booked-info").hidden = true;
+    document.getElementById("checkin-banner").hidden = true;
+  }
+}
+
+function handleCheckinState(ev, now) {
+  const banner = document.getElementById("checkin-banner");
+  const sub = document.getElementById("checkin-banner-sub");
+  const endBtn = document.getElementById("end-btn");
+  const countdownWrap = document.getElementById("countdown-wrap");
+
+  if (isCheckedIn(ev)) {
+    banner.hidden = true;
+    endBtn.hidden = false;
+    countdownWrap.style.display = "";
+    return;
+  }
+
+  const startMs = new Date(ev.start).getTime();
+  const deadlineMs = startMs + CONFIG.CHECKIN_WINDOW_MIN * 60_000;
+  const remaining = deadlineMs - now.getTime();
+
+  if (remaining > 0) {
+    // Check-in pending: show banner, hide countdown + end btn to focus attention
+    banner.hidden = false;
+    endBtn.hidden = true;
+    countdownWrap.style.display = "none";
+    const mm = String(Math.floor(remaining / 60000)).padStart(2, "0");
+    const ss = String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0");
+    sub.textContent = `Se cancelará en ${mm}:${ss} si no confirmas`;
+  } else {
+    // Window elapsed → auto-cancel (once per event)
+    banner.hidden = true;
+    if (!state.autoCancelled.has(ev.id)) {
+      state.autoCancelled.add(ev.id);
+      autoCancelEvent(ev);
+    }
+  }
+}
+
+async function autoCancelEvent(ev) {
+  try {
+    await endEvent(ev.id);
+    toast("Sala liberada: no se confirmó asistencia", "error");
+    await loadEvents();
+  } catch (err) {
+    console.error("Auto-cancel failed", err);
+    // Allow retry on next tick if it failed
+    state.autoCancelled.delete(ev.id);
+  }
+}
+
+async function handleCheckinClick() {
+  const current = getCurrentEvent();
+  if (!current || state.checkingIn) return;
+  const btn = document.getElementById("checkin-btn");
+  state.checkingIn = true;
+  btn.disabled = true;
+  const oldHtml = btn.innerHTML;
+  btn.textContent = "Confirmando…";
+  try {
+    await checkInEvent(current.id);
+    // Optimistic: mark locally so UI updates instantly
+    current.description = `[CHECKED_IN:${new Date().toISOString()}]\n${current.description || ""}`;
+    toast("Asistencia confirmada", "success");
+    renderStatus();
+    loadEvents(); // no await — refresh in background
+  } catch (err) {
+    toast("No se pudo confirmar. Reintenta.", "error");
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = oldHtml;
+    state.checkingIn = false;
   }
 }
 
@@ -534,7 +646,8 @@ async function handleTitleConfirm() {
     await quickBookWithTitle(baseTitle, person);
     titleModal.close();
   } catch (err) {
-    titleModal.showError("No se pudo reservar. Reintenta.");
+    const msg = /Conflict with "(.+)"/.exec(err.message);
+    titleModal.showError(msg ? `Se solapa con "${msg[1]}"` : "No se pudo reservar. Reintenta.");
     console.error(err);
   } finally {
     btn.disabled = false;
@@ -880,6 +993,9 @@ function init() {
 
   // End meeting button
   document.getElementById("end-btn").addEventListener("click", () => endModal.open());
+
+  // Check-in button
+  document.getElementById("checkin-btn").addEventListener("click", handleCheckinClick);
   document.querySelectorAll("[data-end-close]").forEach(el => {
     el.addEventListener("click", () => endModal.close());
   });
