@@ -355,8 +355,18 @@ function handleCheckinState(ev, now) {
     const ss = String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0");
     sub.textContent = `Se cancelará en ${mm}:${ss} si no confirmas`;
   } else {
-    // Window elapsed → auto-cancel (once per event)
+    // Window elapsed. The server-side cron (every 5 min) is the main mechanism.
+    // Client-side fallback: auto-cancel, but with guardrails against races.
     banner.hidden = true;
+
+    // If a check-in request is in flight, give it time to land.
+    if (state.checkingIn) return;
+
+    // 30s grace after the deadline in case the check-in request is pending
+    // via another device, or the GET hasn't refreshed yet.
+    const GRACE_MS = 30_000;
+    if (remaining > -GRACE_MS) return;
+
     if (!state.autoCancelled.has(ev.id)) {
       state.autoCancelled.add(ev.id);
       autoCancelEvent(ev);
@@ -772,6 +782,15 @@ function mountPeoplePicker(containerId, { selectable, onPick }) {
     .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
   const initials = [...new Set(people.map(n => n[0].toUpperCase()))].sort();
 
+  // Persistent "Seleccionado" chip (selectable mode only)
+  let selectedChip = null;
+  if (selectable) {
+    selectedChip = document.createElement("div");
+    selectedChip.className = "people-selected-chip";
+    selectedChip.hidden = true;
+    host.appendChild(selectedChip);
+  }
+
   // Search input
   const search = document.createElement("input");
   search.type = "text";
@@ -808,6 +827,33 @@ function mountPeoplePicker(containerId, { selectable, onPick }) {
   let activeQuery = "";
   let selected = null;
 
+  function renderSelectedChip() {
+    if (!selectedChip) return;
+    if (!selected) { selectedChip.hidden = true; return; }
+    selectedChip.hidden = false;
+    selectedChip.innerHTML = "";
+    const label = document.createElement("span");
+    label.className = "people-selected-label";
+    label.textContent = "Seleccionado:";
+    const name = document.createElement("strong");
+    name.textContent = selected;
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "people-selected-clear";
+    x.setAttribute("aria-label", "Quitar selección");
+    x.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+    x.addEventListener("click", (e) => {
+      e.stopPropagation();
+      selected = null;
+      onPick(null);
+      renderSelectedChip();
+      render();
+    });
+    selectedChip.appendChild(label);
+    selectedChip.appendChild(name);
+    selectedChip.appendChild(x);
+  }
+
   function render() {
     grid.innerHTML = "";
     const q = activeQuery.toLowerCase();
@@ -832,6 +878,7 @@ function mountPeoplePicker(containerId, { selectable, onPick }) {
       b.addEventListener("click", () => {
         if (selectable) {
           selected = name;
+          renderSelectedChip();
           grid.querySelectorAll("button").forEach(x =>
             x.classList.toggle("selected", x.dataset.person === name)
           );
@@ -858,6 +905,7 @@ function mountPeoplePicker(containerId, { selectable, onPick }) {
   });
 
   render();
+  renderSelectedChip();
 }
 
 async function handleBookConfirm() {

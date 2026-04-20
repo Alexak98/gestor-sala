@@ -268,43 +268,78 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 
 /* ---------- Check-in banner ---------- */
 .checkin-banner {
-  margin-top: 8px;
-  margin-bottom: 16px;
-  padding: 18px 20px;
-  background: rgba(0, 0, 0, 0.25);
-  border-radius: var(--r-md);
+  margin-top: 12px;
+  margin-bottom: 20px;
+  padding: 22px 24px;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: var(--r-lg);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   align-items: flex-start;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  animation: banner-pop 0.4s cubic-bezier(.2, 1.1, .4, 1);
 }
 
 .checkin-banner[hidden] { display: none; }
 
+@keyframes banner-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.checkin-banner-welcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  opacity: 0.9;
+  letter-spacing: 0.1px;
+  margin-bottom: 2px;
+}
+
+.checkin-banner-emoji {
+  font-size: 1.25rem;
+  animation: wave 2s ease-in-out infinite;
+  transform-origin: 70% 70%;
+  display: inline-block;
+}
+
+@keyframes wave {
+  0%, 60%, 100% { transform: rotate(0deg); }
+  10%, 30% { transform: rotate(14deg); }
+  20% { transform: rotate(-8deg); }
+  40% { transform: rotate(-4deg); }
+  50% { transform: rotate(10deg); }
+}
+
 .checkin-banner-title {
-  font-size: 1.1rem;
-  font-weight: 700;
-  letter-spacing: -0.2px;
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  line-height: 1.15;
 }
 
 .checkin-banner-sub {
-  font-size: 0.95rem;
+  font-size: 1rem;
   opacity: 0.9;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  margin-bottom: 8px;
+  margin-top: 4px;
+  margin-bottom: 12px;
 }
 
 .checkin-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 18px 28px;
+  gap: 12px;
+  padding: 22px 34px;
   background: #fff;
   color: var(--booked-dark);
   border-radius: var(--r-pill);
-  font-size: 1.15rem;
+  font-size: 1.25rem;
   font-weight: 800;
   letter-spacing: 0.2px;
   box-shadow: var(--shadow-md);
@@ -800,6 +835,44 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   flex-direction: column;
   gap: 10px;
 }
+
+.people-selected-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  background: var(--free);
+  color: #fff;
+  border-radius: var(--r-pill);
+  font-size: 0.95rem;
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.people-selected-chip[hidden] { display: none; }
+
+.people-selected-label {
+  opacity: 0.85;
+  font-weight: 500;
+}
+
+.people-selected-chip strong {
+  font-weight: 700;
+}
+
+.people-selected-clear {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.people-selected-clear:hover { background: rgba(255, 255, 255, 0.4); }
 
 .people-search {
   width: 100%;
