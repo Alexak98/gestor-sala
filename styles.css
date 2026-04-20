@@ -852,8 +852,19 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   border-radius: var(--r-lg);
   padding: 30px 28px 24px;
   width: min(500px, 92vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   box-shadow: var(--shadow-lg);
 }
+
+.modal-panel::-webkit-scrollbar { width: 8px; }
+.modal-panel::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+.modal-panel::-webkit-scrollbar-track { background: transparent; }
 
 .modal-title {
   font-size: 1.5rem;
