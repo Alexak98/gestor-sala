@@ -56,7 +56,6 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 
 .header-logo {
-  margin-left: auto;
   height: 40px;
   width: auto;
   display: block;
@@ -64,6 +63,41 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   padding: 6px 14px;
   border-radius: 10px;
 }
+
+.offline-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 10px;
+  background: #3a2020;
+  color: #ffb3b3;
+  border-radius: var(--r-pill);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  border: 1px solid #5b2e2e;
+  margin-right: 12px;
+}
+
+.offline-badge[hidden] { display: none; }
+
+.offline-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff6b6b;
+  animation: pulse-red 1.6s infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Push logo to the right if offline badge not present */
+.header-logo { margin-left: auto; }
+.offline-badge + .header-logo { margin-left: 0; }
 
 /* ---------- Main grid ---------- */
 .main {
@@ -281,6 +315,26 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .checkin-btn:active { transform: scale(0.97); }
 .checkin-btn:disabled { opacity: 0.7; cursor: not-allowed; }
 
+.checkin-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.checkin-cancel-btn {
+  padding: 10px 16px;
+  background: transparent;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0.85;
+}
+
+.checkin-cancel-btn:hover { opacity: 1; }
+
 /* ---------- End button (big, high-contrast) ---------- */
 .end-btn {
   display: inline-flex;
@@ -418,8 +472,8 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 
 .event-cancel-btn {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: transparent;
   color: var(--ink-3);
@@ -427,7 +481,8 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   align-items: center;
   justify-content: center;
   transition: background 0.15s, color 0.15s;
-  margin-top: -2px;
+  margin-top: -6px;
+  margin-right: -6px;
 }
 
 .event-cancel-btn:hover {
@@ -863,6 +918,69 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 .btn-primary:hover { background: var(--free-dark); }
 .btn-primary:disabled { background: #aaa; cursor: not-allowed; }
+
+.btn-big {
+  width: 100%;
+  padding: 18px 24px;
+  font-size: 1.1rem;
+  font-weight: 800;
+  border-radius: var(--r-md);
+}
+
+.btn-link {
+  background: transparent;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 10px 16px;
+}
+
+.btn-link:hover { color: var(--ink); }
+
+.modal-actions--stack {
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+  margin-top: 20px;
+}
+
+/* Title chips */
+.title-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.title-chip {
+  padding: 14px 20px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-pill);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: #fff;
+  transition: all 0.15s;
+}
+
+.title-chip:hover { border-color: var(--ink-3); }
+
+.title-chip.selected {
+  background: var(--free);
+  color: #fff;
+  border-color: var(--free);
+}
+
+.modal-field--collapsible > span {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+
+.modal-field--collapsible input {
+  padding: 10px 14px;
+  font-size: 0.95rem;
+}
 
 .btn-danger {
   background: var(--booked);

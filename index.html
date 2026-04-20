@@ -16,6 +16,10 @@
     <!-- Header -->
     <header class="header">
       <h1 class="room-name" id="room-name">Sala Reuniones</h1>
+      <div class="offline-badge" id="offline-badge" hidden>
+        <span class="offline-dot"></span>
+        <span id="offline-text">Sin conexión</span>
+      </div>
       <img class="header-logo" src="https://www.yurest.com/wp-content/uploads/2022/10/logotipo-yurest-rojo.png" alt="Yurest" />
     </header>
 
@@ -68,12 +72,15 @@
           <div class="checkin-banner" id="checkin-banner" hidden>
             <div class="checkin-banner-title">Confirma tu asistencia</div>
             <div class="checkin-banner-sub" id="checkin-banner-sub">Se cancelará en 15:00 si no confirmas</div>
-            <button class="checkin-btn" id="checkin-btn" type="button">
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="5 12 10 17 19 8" />
-              </svg>
-              Confirmar asistencia
-            </button>
+            <div class="checkin-actions">
+              <button class="checkin-btn" id="checkin-btn" type="button">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="5 12 10 17 19 8" />
+                </svg>
+                Confirmar asistencia
+              </button>
+              <button class="checkin-cancel-btn" id="checkin-cancel-btn" type="button">Cancelar reserva</button>
+            </div>
           </div>
 
           <div class="countdown" id="countdown-wrap">
@@ -117,10 +124,6 @@
       <div class="modal-backdrop" data-close></div>
       <div class="modal-panel modal-panel--wide">
         <h2 class="modal-title">Reservar sala</h2>
-        <label class="modal-field">
-          <span>Título de la reunión</span>
-          <input type="text" id="book-title" placeholder="Reunión rápida" />
-        </label>
         <div class="modal-field">
           <span>¿Quién reserva?</span>
           <div class="people-picker" id="people-picker"></div>
@@ -163,9 +166,13 @@
             <button type="button" class="btn btn-secondary" id="duration-back">Volver a duraciones</button>
           </div>
         </div>
+        <label class="modal-field">
+          <span>Título (opcional)</span>
+          <input type="text" id="book-title" placeholder="Reunión rápida" autocomplete="off" />
+        </label>
         <div class="modal-actions">
           <button class="btn btn-secondary" data-close>Cancelar</button>
-          <button class="btn btn-primary" id="confirm-book">Confirmar</button>
+          <button class="btn btn-primary" id="confirm-book">Reservar</button>
         </div>
         <div class="modal-error" id="modal-error" hidden></div>
       </div>
@@ -188,15 +195,16 @@
     <div class="modal" id="title-modal" hidden>
       <div class="modal-backdrop" data-title-close></div>
       <div class="modal-panel">
-        <h2 class="modal-title">Título de la reunión</h2>
+        <h2 class="modal-title">¿De qué trata?</h2>
         <p class="modal-text" id="title-modal-text">—</p>
-        <label class="modal-field">
-          <span>¿De qué trata?</span>
-          <input type="text" id="quick-title-input" placeholder="Reunión rápida" autocomplete="off" />
+        <div class="title-chips" id="title-chips"></div>
+        <label class="modal-field modal-field--collapsible">
+          <span>O escribir otro título (opcional)</span>
+          <input type="text" id="quick-title-input" placeholder="Título personalizado" autocomplete="off" />
         </label>
-        <div class="modal-actions">
-          <button class="btn btn-secondary" data-title-close>Cancelar</button>
-          <button class="btn btn-primary" id="confirm-title">Reservar</button>
+        <div class="modal-actions modal-actions--stack">
+          <button class="btn btn-primary btn-big" id="confirm-title">Reservar sin título</button>
+          <button class="btn btn-link" data-title-close>Cancelar</button>
         </div>
         <div class="modal-error" id="title-modal-error" hidden></div>
       </div>

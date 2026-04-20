@@ -19,6 +19,7 @@ const CONFIG = {
 
   // Refresh intervals
   REFRESH_EVENTS_MS: 60_000, // re-fetch events every 60s
+  OFFLINE_THRESHOLD_MS: 150_000, // show offline badge if no successful fetch in 2.5 min
   REFRESH_CLOCK_MS: 1_000,   // tick every second
 
   // Locale
@@ -59,6 +60,9 @@ const CONFIG = {
     "Maria Fernandez",
     "Marina Rubio",
   ],
+
+  // Títulos sugeridos para reserva rápida (chips)
+  QUICK_TITLES: ["Reunión", "Llamada", "Entrevista", "1:1", "Formación"],
 };
 
 /* =========================================================
@@ -213,11 +217,14 @@ function isCheckedIn(ev) {
 const state = {
   events: [],
   lastFetch: 0,
+  lastFetchOk: 0,            // timestamp of last successful fetch
+  fetchFailing: false,
   bookingDuration: 30,
   bookingPerson: null,
   autoCancelled: new Set(), // event IDs already auto-cancelled this session
   checkingIn: false,
-  customDuration: false, // true when user picked "Más…" (end time mode)
+  customDuration: false,     // true when user picked "Más…" (end time mode)
+  quickTitleChoice: null,    // chip selected in title modal
 };
 
 /* =========================================================
@@ -308,6 +315,8 @@ function renderStatus() {
       const mins = Math.round((new Date(next.start) - now) / 60000);
       if (mins <= 60) {
         statusSublabel.textContent = `Próxima reunión en ${mins} min`;
+      } else if (mins <= 180) {
+        statusSublabel.textContent = `Libre ${formatMins(mins)} · hasta las ${fmtTime(next.start)}`;
       } else {
         statusSublabel.textContent = `Libre hasta las ${fmtTime(next.start)}`;
       }
@@ -496,7 +505,7 @@ function escapeHtml(s) {
 const modal = {
   open(opts = {}) {
     document.getElementById("modal").hidden = false;
-    document.getElementById("book-title").focus();
+    // No autofocus — don't pop the tablet keyboard
     document.getElementById("modal-error").hidden = true;
 
     // Default date/time. If booking while BOOKED, suggest right after current ends.
@@ -635,8 +644,7 @@ function sameDay(a, b) {
 const whoModal = {
   open(mins) {
     state.bookingDuration = mins;
-    const label = mins === 60 ? "1 hora" : `${mins} min`;
-    document.getElementById("who-modal-text").textContent = `Reserva rápida de ${label}`;
+    document.getElementById("who-modal-text").textContent = `Reserva rápida de ${formatMins(mins)}`;
     mountPeoplePicker("who-people-picker", {
       selectable: false,
       onPick: (name) => {
@@ -658,18 +666,20 @@ const titleModal = {
   open(person) {
     state.bookingPerson = person;
     const mins = state.bookingDuration;
-    const label = mins === 60 ? "1 hora" : `${mins} min`;
-    document.getElementById("title-modal-text").textContent =
-      `${person} · ${label}`;
+    const label = formatMins(mins);
+    document.getElementById("title-modal-text").textContent = `${person} · ${label}`;
     const input = document.getElementById("quick-title-input");
     input.value = "";
     document.getElementById("title-modal-error").hidden = true;
+    renderTitleChips();
+    updateTitleButton(null);
     document.getElementById("title-modal").hidden = false;
-    setTimeout(() => input.focus(), 50);
+    // No autofocus — avoid popping the on-screen keyboard on tablets
   },
   close() {
     document.getElementById("title-modal").hidden = true;
     state.bookingPerson = null;
+    state.quickTitleChoice = null;
   },
   showError(msg) {
     const el = document.getElementById("title-modal-error");
@@ -678,11 +688,41 @@ const titleModal = {
   },
 };
 
+function renderTitleChips() {
+  const host = document.getElementById("title-chips");
+  host.innerHTML = "";
+  for (const t of CONFIG.QUICK_TITLES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "title-chip";
+    b.textContent = t;
+    b.addEventListener("click", () => {
+      state.quickTitleChoice = t;
+      document.getElementById("quick-title-input").value = "";
+      host.querySelectorAll(".title-chip").forEach(x =>
+        x.classList.toggle("selected", x === b)
+      );
+      updateTitleButton(t);
+    });
+    host.appendChild(b);
+  }
+}
+
+function updateTitleButton(title) {
+  const btn = document.getElementById("confirm-title");
+  if (title) btn.textContent = `Reservar · ${title}`;
+  else {
+    const typed = document.getElementById("quick-title-input").value.trim();
+    btn.textContent = typed ? `Reservar · ${typed}` : "Reservar sin título";
+  }
+}
+
 async function handleTitleConfirm() {
   const person = state.bookingPerson;
   if (!person) { titleModal.close(); return; }
   const input = document.getElementById("quick-title-input");
-  const baseTitle = input.value.trim() || "Reunión rápida";
+  const typed = input.value.trim();
+  const baseTitle = typed || state.quickTitleChoice || "Reunión rápida";
 
   const btn = document.getElementById("confirm-title");
   btn.disabled = true;
@@ -708,7 +748,10 @@ function mountPeoplePicker(containerId, { selectable, onPick }) {
   const host = document.getElementById(containerId);
   host.innerHTML = "";
 
-  const people = [...CONFIG.PEOPLE].map(s => s.trim()).filter(Boolean);
+  const people = [...CONFIG.PEOPLE]
+    .map(s => s.trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
   const initials = [...new Set(people.map(n => n[0].toUpperCase()))].sort();
 
   // Search input
@@ -993,6 +1036,13 @@ function fmtTime(iso) {
   });
 }
 
+function formatMins(mins) {
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if (m === 0) return h === 1 ? "1 hora" : `${h} horas`;
+  return `${h}h ${m}min`;
+}
+
 function fmtDateTime(iso) {
   const d = new Date(iso);
   const date = d.toLocaleDateString(CONFIG.LOCALE, { day: "numeric", month: "short" });
@@ -1020,11 +1070,28 @@ async function loadEvents() {
     const events = await fetchEvents();
     state.events = events;
     state.lastFetch = Date.now();
+    state.lastFetchOk = Date.now();
+    state.fetchFailing = false;
     renderEventsList();
     renderStatus();
+    updateOfflineBadge();
   } catch (err) {
     console.error("Error cargando eventos:", err);
-    toast("Error cargando eventos", "error");
+    state.fetchFailing = true;
+    updateOfflineBadge();
+  }
+}
+
+function updateOfflineBadge() {
+  const badge = document.getElementById("offline-badge");
+  if (!badge) return;
+  const age = Date.now() - (state.lastFetchOk || 0);
+  const isOffline = state.fetchFailing && age > CONFIG.OFFLINE_THRESHOLD_MS;
+  badge.hidden = !isOffline;
+  if (isOffline) {
+    const mins = Math.floor(age / 60_000);
+    document.getElementById("offline-text").textContent =
+      mins ? `Sin conexión · hace ${mins} min` : "Sin conexión";
   }
 }
 
@@ -1085,6 +1152,15 @@ function init() {
   document.getElementById("confirm-title").addEventListener("click", handleTitleConfirm);
   document.getElementById("quick-title-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") handleTitleConfirm();
+  });
+  // Update button label as user types / clear chip selection
+  document.getElementById("quick-title-input").addEventListener("input", () => {
+    if (state.quickTitleChoice) {
+      state.quickTitleChoice = null;
+      document.querySelectorAll("#title-chips .title-chip.selected")
+        .forEach(c => c.classList.remove("selected"));
+    }
+    updateTitleButton(null);
   });
 
   // Modal — close handlers
@@ -1190,6 +1266,16 @@ function init() {
 
   // Check-in button
   document.getElementById("checkin-btn").addEventListener("click", handleCheckinClick);
+
+  // Cancel reservation from the check-in banner
+  document.getElementById("checkin-cancel-btn").addEventListener("click", () => {
+    const current = getCurrentEvent();
+    if (!current) return;
+    cancelModal.open(current.id);
+  });
+
+  // Update offline badge once a minute
+  setInterval(updateOfflineBadge, 30_000);
 
   // "Reservar otra" from the BOOKED view — opens custom modal starting after the current event
   document.getElementById("schedule-other-btn").addEventListener("click", () => {
