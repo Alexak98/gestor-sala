@@ -26,6 +26,11 @@ const CONFIG = {
   DAY_START_HOUR: 8,
   DAY_END_HOUR: 18,
 
+  // Feature thresholds
+  ENDING_SOON_MIN: 2,        // amber countdown in last N minutes
+  NEXT_WARN_MIN: 5,          // show "próxima en X min" banner when next is ≤N min away
+  AGENDA_WEEK_DAYS: 7,       // "7 días" tab range
+
   // Locale
   LOCALE: "es-ES",
   TIMEZONE: "Europe/Madrid",
@@ -216,6 +221,41 @@ function isCheckedIn(ev) {
 }
 
 /* =========================================================
+ * Title + person helpers
+ * ========================================================= */
+/** Split "Título — Persona" into { cleanTitle, person } */
+function splitTitle(full) {
+  if (!full) return { cleanTitle: "", person: null };
+  const idx = full.lastIndexOf(" — ");
+  if (idx < 0) return { cleanTitle: full, person: null };
+  const person = full.slice(idx + 3).trim();
+  // Only treat as person if it matches one we know, to avoid false positives
+  const known = CONFIG.PEOPLE.some(
+    p => p.trim().toLowerCase() === person.toLowerCase()
+  );
+  if (!known) return { cleanTitle: full, person: null };
+  return { cleanTitle: full.slice(0, idx).trim(), person };
+}
+
+function getInitials(name) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w[0].toUpperCase())
+    .join("");
+}
+
+function colorFromName(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 55%, 48%)`;
+}
+
+/* =========================================================
  * State
  * ========================================================= */
 const state = {
@@ -229,6 +269,7 @@ const state = {
   checkingIn: false,
   customDuration: false,     // true when user picked "Más…" (end time mode)
   quickTitleChoice: null,    // chip selected in title modal
+  dayView: "today",          // "today" | "tomorrow" | "week"
 };
 
 /* =========================================================
@@ -297,6 +338,10 @@ function renderStatus() {
     const ss = String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0");
     document.getElementById("countdown-time").textContent = `${mm}:${ss}`;
 
+    // Amber pulse in the last N minutes
+    const endingSoon = remaining > 0 && remaining <= CONFIG.ENDING_SOON_MIN * 60_000;
+    document.getElementById("countdown-wrap").classList.toggle("countdown--ending", endingSoon);
+
     // Progress bar (elapsed)
     const totalMs = new Date(current.end) - new Date(current.start);
     const pct = totalMs > 0 ? Math.min(1, 1 - remaining / totalMs) : 0;
@@ -304,9 +349,48 @@ function renderStatus() {
     progressBar.hidden = false;
 
     document.getElementById("booked-info").hidden = false;
-    document.getElementById("booked-title").textContent = current.title;
+
+    // Split "Título — Persona" for richer display + avatar
+    const { cleanTitle, person } = splitTitle(current.title);
+    document.getElementById("booked-title").textContent = cleanTitle || current.title;
+    const withEl = document.getElementById("booked-with");
+    const nameEl = document.getElementById("booked-person-name");
+    const avatarEl = document.getElementById("booked-avatar");
+    if (person) {
+      withEl.hidden = false;
+      nameEl.textContent = person;
+      avatarEl.textContent = getInitials(person);
+      avatarEl.style.background = colorFromName(person);
+      avatarEl.hidden = false;
+    } else {
+      withEl.hidden = true;
+      avatarEl.textContent = "";
+      avatarEl.style.background = "rgba(255,255,255,0.15)";
+      avatarEl.hidden = !current.organizer;
+      if (!person && current.organizer) {
+        avatarEl.textContent = getInitials(current.organizer);
+        avatarEl.style.background = colorFromName(current.organizer);
+      }
+    }
     document.getElementById("booked-organizer").textContent =
-      current.organizer ? `Organiza ${current.organizer}` : "";
+      (!person && current.organizer) ? `Organiza ${current.organizer}` : "";
+
+    // "Próxima en X min" banner if there's a near event
+    const nextEl = document.getElementById("next-meeting");
+    const nextTextEl = document.getElementById("next-meeting-text");
+    if (next) {
+      const minsToNext = Math.round((new Date(next.start) - now) / 60_000);
+      if (minsToNext > 0 && minsToNext <= CONFIG.NEXT_WARN_MIN) {
+        nextEl.hidden = false;
+        const nextSplit = splitTitle(next.title);
+        const label = nextSplit.person || nextSplit.cleanTitle || next.title;
+        nextTextEl.textContent = `${fmtTime(next.start)} · ${label} (en ${minsToNext} min)`;
+      } else {
+        nextEl.hidden = true;
+      }
+    } else {
+      nextEl.hidden = true;
+    }
 
     // Check-in / auto-cancel logic
     handleCheckinState(current, now);
@@ -330,6 +414,7 @@ function renderStatus() {
 
     document.getElementById("booked-info").hidden = true;
     document.getElementById("checkin-banner").hidden = true;
+    document.getElementById("countdown-wrap")?.classList.remove("countdown--ending");
   }
 }
 
@@ -428,19 +513,32 @@ function renderEventsList() {
   const list = document.getElementById("events-list");
   const now = new Date();
 
-  // Sub-header with today's summary
+  // Timeline reflects the selected day view
   renderTimeline(now);
 
-  // Hide past events (end already passed)
-  const visible = state.events.filter(ev => new Date(ev.end) > now);
+  const todayK = dayKey(now);
+  const tomorrowK = dayKey(new Date(now.getTime() + 86_400_000));
 
-  if (!visible.length) {
-    list.innerHTML = `<div class="events-empty">No hay eventos próximos</div>`;
-    return;
+  // Filter by day view
+  let visible = state.events.filter(ev => new Date(ev.end) > now);
+  if (state.dayView === "today") {
+    visible = visible.filter(ev => dayKey(new Date(ev.start)) === todayK);
+  } else if (state.dayView === "tomorrow") {
+    visible = visible.filter(ev => dayKey(new Date(ev.start)) === tomorrowK);
+  } else {
+    // week: next 7 days from today
+    const cutoff = new Date(now.getTime() + CONFIG.AGENDA_WEEK_DAYS * 86_400_000);
+    visible = visible.filter(ev => new Date(ev.start) < cutoff);
   }
 
-  const today = dayKey(now);
-  const tomorrow = dayKey(new Date(now.getTime() + 86_400_000));
+  if (!visible.length) {
+    const emptyMsg =
+      state.dayView === "today" ? "Sin reuniones el resto del día" :
+      state.dayView === "tomorrow" ? "Sin reuniones mañana" :
+      "Sin reuniones en los próximos días";
+    list.innerHTML = `<div class="events-empty">${escapeHtml(emptyMsg)}</div>`;
+    return;
+  }
 
   const groups = new Map();
   for (const ev of visible) {
@@ -452,8 +550,8 @@ function renderEventsList() {
   const sortedKeys = [...groups.keys()].sort();
   const html = sortedKeys.map(key => {
     let header;
-    if (key === today) header = "HOY";
-    else if (key === tomorrow) header = "MAÑANA";
+    if (key === todayK) header = "HOY";
+    else if (key === tomorrowK) header = "MAÑANA";
     else header = groupHeaderFromKey(key);
 
     const items = groups.get(key)
@@ -505,7 +603,21 @@ function renderTimeline(now = new Date()) {
   const track = document.getElementById("timeline-track");
   const hoursEl = document.getElementById("timeline-hours");
   const subEl = document.getElementById("events-header-sub");
+  const timelineEl = document.getElementById("timeline");
   if (!track || !hoursEl) return;
+
+  // Hide timeline entirely on "week" view
+  if (state.dayView === "week") {
+    timelineEl.hidden = true;
+    if (subEl) subEl.textContent = `Próximos ${CONFIG.AGENDA_WEEK_DAYS} días`;
+    return;
+  }
+  timelineEl.hidden = false;
+
+  const targetDate = state.dayView === "tomorrow"
+    ? new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+    : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const targetKey = dayKey(targetDate);
 
   const startHour = CONFIG.DAY_START_HOUR;
   const endHour = CONFIG.DAY_END_HOUR;
@@ -521,17 +633,15 @@ function renderTimeline(now = new Date()) {
     hoursEl.appendChild(s);
   }
 
-  // Keep only the "now" element; wipe blocks
+  // Wipe existing blocks
   track.querySelectorAll(".timeline-block").forEach(b => b.remove());
 
-  // Today's events
-  const todayKey = dayKey(now);
-  const today = state.events
-    .filter(ev => dayKey(new Date(ev.start)) === todayKey)
+  const dayEvents = state.events
+    .filter(ev => dayKey(new Date(ev.start)) === targetKey)
     .sort((a, b) => new Date(a.start) - new Date(b.start));
 
   let busyMinutes = 0;
-  for (const ev of today) {
+  for (const ev of dayEvents) {
     const s = new Date(ev.start), e = new Date(ev.end);
     const sMin = s.getHours() * 60 + s.getMinutes();
     const eMin = e.getHours() * 60 + e.getMinutes();
@@ -546,8 +656,9 @@ function renderTimeline(now = new Date()) {
 
     const block = document.createElement("div");
     block.className = "timeline-block";
-    const isCurrent = s <= now && now < e;
-    if (isCurrent) block.classList.add("timeline-block--current");
+    if (state.dayView === "today" && s <= now && now < e) {
+      block.classList.add("timeline-block--current");
+    }
     block.style.left = `${leftPct}%`;
     block.style.width = `${widthPct}%`;
     block.title = `${ev.title} · ${fmtTime(ev.start)}–${fmtTime(ev.end)}`;
@@ -555,23 +666,28 @@ function renderTimeline(now = new Date()) {
     track.appendChild(block);
   }
 
-  // "Now" indicator
+  // "Now" indicator only on today view
   const nowEl = document.getElementById("timeline-now");
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  if (nowMin < startMin || nowMin > endMin) {
+  if (state.dayView !== "today") {
     nowEl.hidden = true;
   } else {
-    nowEl.hidden = false;
-    nowEl.style.left = `${((nowMin - startMin) / rangeMin) * 100}%`;
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    if (nowMin < startMin || nowMin > endMin) {
+      nowEl.hidden = true;
+    } else {
+      nowEl.hidden = false;
+      nowEl.style.left = `${((nowMin - startMin) / rangeMin) * 100}%`;
+    }
   }
 
   // Sub-header summary
   if (subEl) {
     const busyH = Math.floor(busyMinutes / 60);
     const busyM = busyMinutes % 60;
+    const dayLabel = state.dayView === "tomorrow" ? "mañana" : "hoy";
     const txt = busyMinutes
-      ? `${today.length} ${today.length === 1 ? "reunión" : "reuniones"} hoy · ${busyH ? busyH + "h " : ""}${busyM}min ocupada`
-      : "Sin reuniones hoy";
+      ? `${dayEvents.length} ${dayEvents.length === 1 ? "reunión" : "reuniones"} ${dayLabel} · ${busyH ? busyH + "h " : ""}${busyM}min ocupada`
+      : `Sin reuniones ${dayLabel}`;
     subEl.textContent = txt;
   }
 }
@@ -580,6 +696,7 @@ function renderTimeline(now = new Date()) {
  * Click on empty timeline region → open custom book modal with that start time.
  */
 function handleTimelineClick(e) {
+  if (state.dayView === "week") return; // timeline hidden anyway
   // Ignore clicks on busy blocks
   if (e.target.closest(".timeline-block")) return;
   const track = document.getElementById("timeline-track");
@@ -589,15 +706,15 @@ function handleTimelineClick(e) {
   const startMin = CONFIG.DAY_START_HOUR * 60;
   const endMin = CONFIG.DAY_END_HOUR * 60;
   const totalMin = startMin + pct * (endMin - startMin);
-  // Round to nearest 15 min
   const rounded = Math.round(totalMin / 15) * 15;
   const h = Math.floor(rounded / 60);
   const m = rounded % 60;
 
-  const target = new Date();
-  target.setHours(h, m, 0, 0);
+  const base = state.dayView === "tomorrow"
+    ? new Date(Date.now() + 86_400_000)
+    : new Date();
+  const target = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
 
-  // If the target is in the past, snap to the next 15-min slot from now
   if (target.getTime() < Date.now()) {
     const now = new Date();
     now.setMinutes(Math.ceil(now.getMinutes() / 15) * 15, 0, 0);
@@ -1467,6 +1584,17 @@ function init() {
 
   // Timeline: click on free area opens booking modal preset to that time
   document.getElementById("timeline-track").addEventListener("click", handleTimelineClick);
+
+  // Day tabs
+  document.getElementById("day-tabs").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-day]");
+    if (!btn) return;
+    state.dayView = btn.dataset.day;
+    document.querySelectorAll("#day-tabs button").forEach(b =>
+      b.classList.toggle("active", b === btn)
+    );
+    renderEventsList();
+  });
   document.querySelectorAll("[data-end-close]").forEach(el => {
     el.addEventListener("click", () => endModal.close());
   });

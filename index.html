@@ -63,9 +63,21 @@
 
         <!-- BOOKED state: current meeting + countdown -->
         <div class="booked-info" id="booked-info" hidden>
-          <div class="booked-title" id="booked-title">—</div>
-          <div class="booked-meta">
-            <span class="booked-organizer" id="booked-organizer">—</span>
+          <div class="booked-person">
+            <div class="avatar" id="booked-avatar" aria-hidden="true"></div>
+            <div class="booked-text">
+              <div class="booked-title" id="booked-title">—</div>
+              <div class="booked-with" id="booked-with" hidden>con <strong id="booked-person-name">—</strong></div>
+              <div class="booked-meta">
+                <span class="booked-organizer" id="booked-organizer"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Next meeting warning (≤5 min to next) -->
+          <div class="next-meeting" id="next-meeting" hidden>
+            <span class="next-meeting-label">Próxima</span>
+            <span class="next-meeting-text" id="next-meeting-text">—</span>
           </div>
 
           <!-- Check-in pending banner -->
@@ -119,6 +131,13 @@
         <div class="events-header">
           <span>Agenda</span>
           <span class="events-header-sub" id="events-header-sub">—</span>
+        </div>
+
+        <!-- Day tabs -->
+        <div class="day-tabs" id="day-tabs">
+          <button type="button" data-day="today" class="active">Hoy</button>
+          <button type="button" data-day="tomorrow">Mañana</button>
+          <button type="button" data-day="week">7 días</button>
         </div>
 
         <!-- Mini timeline of today -->
