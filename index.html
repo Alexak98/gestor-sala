@@ -143,6 +143,15 @@
             <button type="button" data-mins="60">1 hora</button>
             <button type="button" data-mins="90">1h 30min</button>
             <button type="button" data-mins="120">2 horas</button>
+            <button type="button" data-mins="more" class="duration-more">Más…</button>
+          </div>
+          <div class="duration-custom" id="duration-custom" hidden>
+            <label class="duration-custom-field">
+              <span>Hora de fin</span>
+              <input type="time" id="book-end-time" step="900" />
+            </label>
+            <div class="duration-custom-info" id="duration-custom-info">—</div>
+            <button type="button" class="btn btn-secondary" id="duration-back">Volver a duraciones</button>
           </div>
         </div>
         <div class="modal-actions">

@@ -217,6 +217,7 @@ const state = {
   bookingPerson: null,
   autoCancelled: new Set(), // event IDs already auto-cancelled this session
   checkingIn: false,
+  customDuration: false, // true when user picked "Más…" (end time mode)
 };
 
 /* =========================================================
@@ -505,6 +506,17 @@ const modal = {
     setSelectedDate(rounded);
     document.getElementById("book-time").value = toTimeInput(rounded);
 
+    // Reset duration mode to predefined (30 min selected)
+    state.customDuration = false;
+    state.bookingDuration = 30;
+    const durWrap = document.getElementById("duration-options");
+    const durCustom = document.getElementById("duration-custom");
+    durWrap.hidden = false;
+    durCustom.hidden = true;
+    durWrap.querySelectorAll("button").forEach(b =>
+      b.classList.toggle("selected", b.dataset.mins === "30")
+    );
+
     mountPeoplePicker("people-picker", {
       selectable: true,
       onPick: (name) => {
@@ -790,6 +802,10 @@ async function handleBookConfirm() {
   const baseTitle = titleInput.value.trim() || "Reunión rápida";
   const title = `${baseTitle} — ${state.bookingPerson}`;
   const mins = state.bookingDuration;
+  if (!mins || mins <= 0) {
+    modal.showError("Duración no válida. Revisa la hora de fin.");
+    return;
+  }
 
   const dateStr = getSelectedDateValue();
   const timeStr = document.getElementById("book-time").value;
@@ -1051,14 +1067,82 @@ function init() {
     el.addEventListener("click", () => modal.close());
   });
 
-  // Duration selector
+  // Duration selector (with "Más…" custom end-time mode)
   const durWrap = document.getElementById("duration-options");
+  const durCustom = document.getElementById("duration-custom");
+  const endTimeInput = document.getElementById("book-end-time");
+  const durInfo = document.getElementById("duration-custom-info");
+
   durWrap.addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-mins]");
     if (!btn) return;
+
+    if (btn.dataset.mins === "more") {
+      // Switch to custom end-time mode
+      state.customDuration = true;
+      durWrap.hidden = true;
+      durCustom.hidden = false;
+      // Default end = start + 2h15m, clamped to hour
+      const start = getBookingStart() || new Date();
+      const end = new Date(start.getTime() + 135 * 60_000);
+      endTimeInput.value = toTimeInput(end);
+      updateCustomDurationInfo();
+      return;
+    }
+
     durWrap.querySelectorAll("button").forEach(b => b.classList.remove("selected"));
     btn.classList.add("selected");
     state.bookingDuration = Number(btn.dataset.mins);
+    state.customDuration = false;
+  });
+
+  document.getElementById("duration-back").addEventListener("click", () => {
+    state.customDuration = false;
+    durCustom.hidden = true;
+    durWrap.hidden = false;
+    // Reset to 30 min selected
+    durWrap.querySelectorAll("button").forEach(b =>
+      b.classList.toggle("selected", b.dataset.mins === "30")
+    );
+    state.bookingDuration = 30;
+  });
+
+  endTimeInput.addEventListener("input", updateCustomDurationInfo);
+
+  function updateCustomDurationInfo() {
+    const start = getBookingStart();
+    if (!start) { durInfo.textContent = "Selecciona fecha y hora de inicio primero"; return; }
+    const [h, m] = (endTimeInput.value || "").split(":").map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) { durInfo.textContent = "Introduce una hora de fin"; return; }
+    const end = new Date(start); end.setHours(h, m, 0, 0);
+    const mins = Math.round((end - start) / 60_000);
+    if (mins <= 0) {
+      durInfo.textContent = "La hora de fin debe ser posterior a la de inicio";
+      durInfo.classList.add("is-error");
+      state.bookingDuration = 0;
+      return;
+    }
+    durInfo.classList.remove("is-error");
+    const h2 = Math.floor(mins / 60), m2 = mins % 60;
+    const parts = [];
+    if (h2) parts.push(`${h2}h`);
+    if (m2) parts.push(`${m2}min`);
+    durInfo.textContent = `Duración: ${parts.join(" ")} (${fmtTime(start)} → ${fmtTime(end)})`;
+    state.bookingDuration = mins;
+  }
+
+  function getBookingStart() {
+    const dateStr = getSelectedDateValue();
+    const timeStr = document.getElementById("book-time").value;
+    if (!dateStr || !timeStr) return null;
+    const [y, mo, d] = dateStr.split("-").map(Number);
+    const [h, mi] = timeStr.split(":").map(Number);
+    return new Date(y, mo - 1, d, h, mi, 0, 0);
+  }
+
+  // Recompute custom duration when start date/time changes
+  document.getElementById("book-time").addEventListener("input", () => {
+    if (state.customDuration) updateCustomDurationInfo();
   });
 
   // Confirm booking

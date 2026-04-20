@@ -635,6 +635,8 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   gap: 10px;
 }
 
+.duration-options[hidden] { display: none; }
+
 .duration-options button {
   padding: 14px 8px;
   border: 1.5px solid var(--line);
@@ -653,6 +655,64 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   color: #fff;
   border-color: var(--free);
 }
+
+.duration-more {
+  grid-column: span 3;
+  background: var(--bg-soft) !important;
+  color: var(--ink) !important;
+  font-weight: 700 !important;
+}
+
+.duration-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.duration-custom[hidden] { display: none; }
+
+.duration-custom-field {
+  display: block;
+}
+
+.duration-custom-field > span {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-2);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+}
+
+.duration-custom-field input {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: 1rem;
+  outline: none;
+  color: var(--ink);
+}
+
+.duration-custom-field input:focus { border-color: var(--free); }
+
+.duration-custom-info {
+  font-size: 0.95rem;
+  color: var(--ink-2);
+  font-weight: 600;
+  padding: 8px 12px;
+  background: var(--bg-soft);
+  border-radius: var(--r-sm);
+}
+
+.duration-custom-info.is-error {
+  background: #fde8e8;
+  color: #c92a2a;
+}
+
+#duration-back { align-self: flex-start; }
 
 /* ---------- People picker ---------- */
 .people-picker {
