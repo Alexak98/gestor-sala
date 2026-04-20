@@ -536,18 +536,36 @@ const modal = {
       selectable: true,
       onPick: (name) => {
         state.bookingPerson = name;
+        // Clear invalid highlight and any stale error about missing person
+        document.getElementById("people-field")?.classList.remove("is-invalid");
+        const err = document.getElementById("modal-error");
+        if (err && /quién reserva/i.test(err.textContent)) err.hidden = true;
       },
     });
+    // Clear any prior highlight
+    document.getElementById("people-field")?.classList.remove("is-invalid");
   },
   close() {
     document.getElementById("modal").hidden = true;
     document.getElementById("book-title").value = "";
     state.bookingPerson = null;
   },
-  showError(msg) {
+  showError(msg, { highlight } = {}) {
     const el = document.getElementById("modal-error");
     el.textContent = msg;
     el.hidden = false;
+    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (highlight) {
+      const field = document.getElementById(highlight);
+      if (field) {
+        field.classList.remove("is-invalid");
+        // force reflow so the animation re-triggers
+        void field.offsetWidth;
+        field.classList.add("is-invalid");
+        field.scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(() => field.classList.remove("is-invalid"), 2400);
+      }
+    }
   },
 };
 
@@ -844,7 +862,7 @@ function mountPeoplePicker(containerId, { selectable, onPick }) {
 
 async function handleBookConfirm() {
   if (!state.bookingPerson) {
-    modal.showError("Selecciona quién reserva");
+    modal.showError("Selecciona quién reserva la sala", { highlight: "people-picker" });
     return;
   }
   const titleInput = document.getElementById("book-title");
