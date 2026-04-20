@@ -184,6 +184,20 @@
       </div>
     </div>
 
+    <!-- Modal: confirm cancel (delete) -->
+    <div class="modal" id="cancel-modal" hidden>
+      <div class="modal-backdrop" data-cancel-close></div>
+      <div class="modal-panel">
+        <h2 class="modal-title">¿Cancelar reunión?</h2>
+        <p class="modal-text" id="cancel-modal-text">Se eliminará del calendario.</p>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" data-cancel-close>No, volver</button>
+          <button class="btn btn-danger" id="confirm-cancel">Sí, cancelar</button>
+        </div>
+        <div class="modal-error" id="cancel-modal-error" hidden></div>
+      </div>
+    </div>
+
     <!-- Modal: confirm end -->
     <div class="modal" id="end-modal" hidden>
       <div class="modal-backdrop" data-end-close></div>

@@ -11,6 +11,7 @@ const CONFIG = {
   N8N_CREATE_EVENT_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-reservar",
   N8N_END_EVENT_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-finalizar",
   N8N_CHECKIN_URL:   "https://n8n-soporte.data.yurest.dev/webhook/sala-checkin",
+  N8N_DELETE_URL:    "https://n8n-soporte.data.yurest.dev/webhook/sala-eliminar",
 
   // Check-in window (minutes): si no se confirma dentro de este tiempo
   // desde el inicio del evento, se cancela automáticamente
@@ -129,6 +130,21 @@ async function createEvent({ title, startISO, endISO }) {
     body: JSON.stringify({ title, start: startISO, end: endISO }),
   });
   if (!res.ok) throw new Error(`POST create ${res.status}`);
+  return await res.json();
+}
+
+async function deleteEvent(eventId) {
+  if (CONFIG.USE_MOCK || !CONFIG.N8N_DELETE_URL) {
+    await new Promise(r => setTimeout(r, 400));
+    state.events = state.events.filter(e => e.id !== eventId);
+    return { deleted: true, eventId };
+  }
+  const res = await fetch(CONFIG.N8N_DELETE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ eventId }),
+  });
+  if (!res.ok) throw new Error(`POST delete ${res.status}`);
   return await res.json();
 }
 
@@ -430,16 +446,27 @@ function renderEventItem(ev, now) {
   const timeFmt = { hour: "2-digit", minute: "2-digit", hour12: false };
   const sStr = s.toLocaleTimeString(CONFIG.LOCALE, timeFmt);
   const eStr = e.toLocaleTimeString(CONFIG.LOCALE, timeFmt);
+  const idAttr = escapeHtml(ev.id);
 
   return `
-    <div class="event-item ${isCurrent ? "event-item--current" : ""}">
-      <div class="event-time">
-        <span>${sStr}</span>
-        <span class="event-time-arrow">→</span>
-        <span>${eStr}</span>
+    <div class="event-item ${isCurrent ? "event-item--current" : ""}" data-event-id="${idAttr}">
+      <div class="event-header">
+        <div class="event-main">
+          <div class="event-time">
+            <span>${sStr}</span>
+            <span class="event-time-arrow">→</span>
+            <span>${eStr}</span>
+          </div>
+          <div class="event-title">${escapeHtml(ev.title)}</div>
+          ${ev.organizer ? `<div class="event-organizer">${escapeHtml(ev.organizer)}</div>` : ""}
+        </div>
+        <button class="event-cancel-btn" data-cancel-id="${idAttr}" aria-label="Cancelar reunión" title="Cancelar reunión">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+            <line x1="6" y1="6" x2="18" y2="18" />
+            <line x1="18" y1="6" x2="6" y2="18" />
+          </svg>
+        </button>
       </div>
-      <div class="event-title">${escapeHtml(ev.title)}</div>
-      ${ev.organizer ? `<div class="event-organizer">${escapeHtml(ev.organizer)}</div>` : ""}
     </div>
   `;
 }
@@ -830,6 +857,52 @@ async function quickBookWithTitle(baseTitle, person) {
 }
 
 /* =========================================================
+ * Modal — cancel (delete) any meeting from the list
+ * ========================================================= */
+const cancelModal = {
+  pendingId: null,
+  open(eventId) {
+    const ev = state.events.find(e => e.id === eventId);
+    if (!ev) return;
+    this.pendingId = eventId;
+    const from = fmtTime(ev.start), to = fmtTime(ev.end);
+    document.getElementById("cancel-modal-text").textContent =
+      `Se eliminará "${ev.title}" (${from}–${to}) del calendario.`;
+    document.getElementById("cancel-modal-error").hidden = true;
+    document.getElementById("cancel-modal").hidden = false;
+  },
+  close() {
+    document.getElementById("cancel-modal").hidden = true;
+    this.pendingId = null;
+  },
+  showError(msg) {
+    const el = document.getElementById("cancel-modal-error");
+    el.textContent = msg;
+    el.hidden = false;
+  },
+};
+
+async function handleCancelConfirm() {
+  const id = cancelModal.pendingId;
+  if (!id) { cancelModal.close(); return; }
+  const btn = document.getElementById("confirm-cancel");
+  btn.disabled = true;
+  btn.textContent = "Cancelando…";
+  try {
+    await deleteEvent(id);
+    cancelModal.close();
+    toast("Reunión cancelada", "success");
+    await loadEvents();
+  } catch (err) {
+    cancelModal.showError("No se pudo cancelar. Reintenta.");
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Sí, cancelar";
+  }
+}
+
+/* =========================================================
  * Modal — end current meeting
  * ========================================================= */
 const endModal = {
@@ -994,6 +1067,18 @@ function init() {
   // End meeting button
   document.getElementById("end-btn").addEventListener("click", () => endModal.open());
 
+  // Cancel buttons (delegated on the events list)
+  document.getElementById("events-list").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-cancel-id]");
+    if (!btn) return;
+    e.stopPropagation();
+    cancelModal.open(btn.dataset.cancelId);
+  });
+  document.querySelectorAll("[data-cancel-close]").forEach(el => {
+    el.addEventListener("click", () => cancelModal.close());
+  });
+  document.getElementById("confirm-cancel").addEventListener("click", handleCancelConfirm);
+
   // Check-in button
   document.getElementById("checkin-btn").addEventListener("click", handleCheckinClick);
   document.querySelectorAll("[data-end-close]").forEach(el => {
@@ -1003,7 +1088,10 @@ function init() {
 
   // Keyboard: Esc closes modals
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { modal.close(); endModal.close(); whoModal.close(); titleModal.close(); dateModal.close(); }
+    if (e.key === "Escape") {
+      modal.close(); endModal.close(); whoModal.close();
+      titleModal.close(); dateModal.close(); cancelModal.close();
+    }
   });
 
   // Prevent tablet screen sleep hint (needs user interaction on most browsers)
