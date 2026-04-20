@@ -22,6 +22,10 @@ const CONFIG = {
   OFFLINE_THRESHOLD_MS: 150_000, // show offline badge if no successful fetch in 2.5 min
   REFRESH_CLOCK_MS: 1_000,   // tick every second
 
+  // Timeline (work hours shown on the mini agenda)
+  DAY_START_HOUR: 8,
+  DAY_END_HOUR: 18,
+
   // Locale
   LOCALE: "es-ES",
   TIMEZONE: "Europe/Madrid",
@@ -424,6 +428,9 @@ function renderEventsList() {
   const list = document.getElementById("events-list");
   const now = new Date();
 
+  // Sub-header with today's summary
+  renderTimeline(now);
+
   // Hide past events (end already passed)
   const visible = state.events.filter(ev => new Date(ev.end) > now);
 
@@ -489,6 +496,115 @@ function renderEventItem(ev, now) {
       </div>
     </div>
   `;
+}
+
+/* =========================================================
+ * Mini timeline of today
+ * ========================================================= */
+function renderTimeline(now = new Date()) {
+  const track = document.getElementById("timeline-track");
+  const hoursEl = document.getElementById("timeline-hours");
+  const subEl = document.getElementById("events-header-sub");
+  if (!track || !hoursEl) return;
+
+  const startHour = CONFIG.DAY_START_HOUR;
+  const endHour = CONFIG.DAY_END_HOUR;
+  const startMin = startHour * 60;
+  const endMin = endHour * 60;
+  const rangeMin = endMin - startMin;
+
+  // Hour labels every 2h
+  hoursEl.innerHTML = "";
+  for (let h = startHour; h <= endHour; h += 2) {
+    const s = document.createElement("span");
+    s.textContent = `${String(h).padStart(2, "0")}:00`;
+    hoursEl.appendChild(s);
+  }
+
+  // Keep only the "now" element; wipe blocks
+  track.querySelectorAll(".timeline-block").forEach(b => b.remove());
+
+  // Today's events
+  const todayKey = dayKey(now);
+  const today = state.events
+    .filter(ev => dayKey(new Date(ev.start)) === todayKey)
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+
+  let busyMinutes = 0;
+  for (const ev of today) {
+    const s = new Date(ev.start), e = new Date(ev.end);
+    const sMin = s.getHours() * 60 + s.getMinutes();
+    const eMin = e.getHours() * 60 + e.getMinutes();
+    const clampedStart = Math.max(sMin, startMin);
+    const clampedEnd = Math.min(eMin, endMin);
+    if (clampedEnd <= clampedStart) continue;
+
+    busyMinutes += clampedEnd - clampedStart;
+
+    const leftPct = ((clampedStart - startMin) / rangeMin) * 100;
+    const widthPct = ((clampedEnd - clampedStart) / rangeMin) * 100;
+
+    const block = document.createElement("div");
+    block.className = "timeline-block";
+    const isCurrent = s <= now && now < e;
+    if (isCurrent) block.classList.add("timeline-block--current");
+    block.style.left = `${leftPct}%`;
+    block.style.width = `${widthPct}%`;
+    block.title = `${ev.title} · ${fmtTime(ev.start)}–${fmtTime(ev.end)}`;
+    block.dataset.eventId = ev.id;
+    track.appendChild(block);
+  }
+
+  // "Now" indicator
+  const nowEl = document.getElementById("timeline-now");
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  if (nowMin < startMin || nowMin > endMin) {
+    nowEl.hidden = true;
+  } else {
+    nowEl.hidden = false;
+    nowEl.style.left = `${((nowMin - startMin) / rangeMin) * 100}%`;
+  }
+
+  // Sub-header summary
+  if (subEl) {
+    const busyH = Math.floor(busyMinutes / 60);
+    const busyM = busyMinutes % 60;
+    const txt = busyMinutes
+      ? `${today.length} ${today.length === 1 ? "reunión" : "reuniones"} hoy · ${busyH ? busyH + "h " : ""}${busyM}min ocupada`
+      : "Sin reuniones hoy";
+    subEl.textContent = txt;
+  }
+}
+
+/**
+ * Click on empty timeline region → open custom book modal with that start time.
+ */
+function handleTimelineClick(e) {
+  // Ignore clicks on busy blocks
+  if (e.target.closest(".timeline-block")) return;
+  const track = document.getElementById("timeline-track");
+  const rect = track.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const pct = Math.max(0, Math.min(1, x / rect.width));
+  const startMin = CONFIG.DAY_START_HOUR * 60;
+  const endMin = CONFIG.DAY_END_HOUR * 60;
+  const totalMin = startMin + pct * (endMin - startMin);
+  // Round to nearest 15 min
+  const rounded = Math.round(totalMin / 15) * 15;
+  const h = Math.floor(rounded / 60);
+  const m = rounded % 60;
+
+  const target = new Date();
+  target.setHours(h, m, 0, 0);
+
+  // If the target is in the past, snap to the next 15-min slot from now
+  if (target.getTime() < Date.now()) {
+    const now = new Date();
+    now.setMinutes(Math.ceil(now.getMinutes() / 15) * 15, 0, 0);
+    modal.open({ startAfter: now });
+  } else {
+    modal.open({ startAfter: target });
+  }
 }
 
 function dayKey(d) {
@@ -1348,6 +1464,9 @@ function init() {
     const current = getCurrentEvent();
     modal.open(current ? { startAfter: current.end } : {});
   });
+
+  // Timeline: click on free area opens booking modal preset to that time
+  document.getElementById("timeline-track").addEventListener("click", handleTimelineClick);
   document.querySelectorAll("[data-end-close]").forEach(el => {
     el.addEventListener("click", () => endModal.close());
   });

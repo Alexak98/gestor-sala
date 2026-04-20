@@ -446,14 +446,133 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 
 .events-header {
-  padding: 18px 22px 14px;
+  padding: 16px 22px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.events-header > span:first-child {
   font-size: 0.82rem;
   font-weight: 700;
   letter-spacing: 1.6px;
   text-transform: uppercase;
   color: var(--ink-2);
-  border-bottom: 1px solid var(--line);
 }
+
+.events-header-sub {
+  font-size: 0.82rem;
+  color: var(--ink-3);
+  font-weight: 500;
+  letter-spacing: 0.1px;
+}
+
+/* ---------- Mini timeline ---------- */
+.timeline {
+  padding: 14px 22px 12px;
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+
+.timeline-hours {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--ink-3);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 6px;
+  padding: 0 1px;
+}
+
+.timeline-track {
+  position: relative;
+  height: 26px;
+  background:
+    linear-gradient(to right, transparent calc(16.66% - 1px), rgba(0,0,0,0.06) calc(16.66% - 1px), rgba(0,0,0,0.06) 16.66%, transparent 16.66%) 0 0 / 16.66% 100% no-repeat,
+    var(--bg-soft);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background-image:
+    linear-gradient(to right,
+      transparent 0%, transparent calc(100%/6 - 1px),
+      rgba(0,0,0,0.06) calc(100%/6 - 1px), rgba(0,0,0,0.06) calc(100%/6),
+      transparent calc(100%/6), transparent calc(200%/6 - 1px),
+      rgba(0,0,0,0.06) calc(200%/6 - 1px), rgba(0,0,0,0.06) calc(200%/6),
+      transparent calc(200%/6), transparent calc(300%/6 - 1px),
+      rgba(0,0,0,0.06) calc(300%/6 - 1px), rgba(0,0,0,0.06) calc(300%/6),
+      transparent calc(300%/6), transparent calc(400%/6 - 1px),
+      rgba(0,0,0,0.06) calc(400%/6 - 1px), rgba(0,0,0,0.06) calc(400%/6),
+      transparent calc(400%/6), transparent calc(500%/6 - 1px),
+      rgba(0,0,0,0.06) calc(500%/6 - 1px), rgba(0,0,0,0.06) calc(500%/6),
+      transparent calc(500%/6), transparent 100%);
+  background-color: var(--bg-soft);
+}
+
+.timeline-block {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  background: rgba(224, 57, 86, 0.78);
+  border-radius: 4px;
+  transition: transform 0.1s;
+  cursor: default;
+}
+
+.timeline-block--current {
+  background: var(--booked);
+  box-shadow: 0 0 0 2px rgba(224, 57, 86, 0.35);
+}
+
+.timeline-now {
+  position: absolute;
+  top: -5px;
+  bottom: -5px;
+  width: 2px;
+  background: var(--ink);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.timeline-now[hidden] { display: none; }
+
+.timeline-now::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+.timeline-legend {
+  display: flex;
+  gap: 18px;
+  margin-top: 8px;
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+.timeline-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeline-legend-swatch {
+  width: 12px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.timeline-legend-swatch--busy { background: var(--booked); opacity: 0.8; }
+.timeline-legend-swatch--free { background: var(--bg-soft); border: 1px solid #dcdce1; }
 
 .events-list {
   flex: 1;
