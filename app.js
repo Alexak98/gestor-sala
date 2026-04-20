@@ -494,17 +494,23 @@ function escapeHtml(s) {
  * Modal — book a meeting
  * ========================================================= */
 const modal = {
-  open() {
+  open(opts = {}) {
     document.getElementById("modal").hidden = false;
     document.getElementById("book-title").focus();
     document.getElementById("modal-error").hidden = true;
 
-    // Default date = today, time = next 15-min slot
+    // Default date/time. If booking while BOOKED, suggest right after current ends.
     const now = new Date();
-    const rounded = new Date(now);
-    rounded.setMinutes(Math.ceil(rounded.getMinutes() / 15) * 15, 0, 0);
-    setSelectedDate(rounded);
-    document.getElementById("book-time").value = toTimeInput(rounded);
+    let defaultStart;
+    if (opts.startAfter) {
+      defaultStart = new Date(opts.startAfter);
+    } else {
+      defaultStart = new Date(now);
+    }
+    // Round up to next 15-min slot
+    defaultStart.setMinutes(Math.ceil(defaultStart.getMinutes() / 15) * 15, 0, 0);
+    setSelectedDate(defaultStart);
+    document.getElementById("book-time").value = toTimeInput(defaultStart);
 
     // Reset duration mode to predefined (30 min selected)
     state.customDuration = false;
@@ -835,7 +841,9 @@ async function handleBookConfirm() {
   btn.textContent = "Creando…";
 
   try {
-    await createEvent({ title, startISO: start.toISOString(), endISO: end.toISOString() });
+    const created = await createEvent({ title, startISO: start.toISOString(), endISO: end.toISOString() });
+    // Auto-check-in if starting now
+    await autoCheckinAfterCreate(created, start);
     modal.close();
     toast("Reunión creada", "success");
     await loadEvents();
@@ -867,9 +875,26 @@ async function quickBookWithTitle(baseTitle, person) {
   }
 
   const title = `${baseTitle} — ${person}`;
-  await createEvent({ title, startISO: start.toISOString(), endISO: end.toISOString() });
+  const created = await createEvent({ title, startISO: start.toISOString(), endISO: end.toISOString() });
+  // Auto-check-in: the person is physically here
+  await autoCheckinAfterCreate(created, start);
   toast(`Reservado ${mins} min — ${person}`, "success");
   await loadEvents();
+}
+
+/**
+ * Auto-check-in if the booking starts within ~1 min of now, since the
+ * person is physically at the tablet. Fails silently.
+ */
+async function autoCheckinAfterCreate(createdEvent, start) {
+  if (!createdEvent?.id) return;
+  const isNow = Math.abs(Date.now() - start.getTime()) < 60_000;
+  if (!isNow) return;
+  try {
+    await checkInEvent(createdEvent.id);
+  } catch (err) {
+    console.warn("Auto-checkin failed (non-blocking)", err);
+  }
 }
 
 /* =========================================================
@@ -1165,6 +1190,12 @@ function init() {
 
   // Check-in button
   document.getElementById("checkin-btn").addEventListener("click", handleCheckinClick);
+
+  // "Reservar otra" from the BOOKED view — opens custom modal starting after the current event
+  document.getElementById("schedule-other-btn").addEventListener("click", () => {
+    const current = getCurrentEvent();
+    modal.open(current ? { startAfter: current.end } : {});
+  });
   document.querySelectorAll("[data-end-close]").forEach(el => {
     el.addEventListener("click", () => endModal.close());
   });

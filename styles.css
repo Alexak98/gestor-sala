@@ -302,6 +302,31 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .end-btn:hover { box-shadow: var(--shadow-lg); }
 .end-btn:active { transform: scale(0.97); }
 
+.booked-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.schedule-other-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 22px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: var(--r-pill);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  backdrop-filter: blur(6px);
+  transition: background 0.15s, transform 0.1s;
+}
+
+.schedule-other-btn:hover { background: rgba(255, 255, 255, 0.28); }
+.schedule-other-btn:active { transform: scale(0.97); }
+
 /* ---------- Progress bar ---------- */
 .progress-bar {
   position: absolute;
