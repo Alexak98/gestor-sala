@@ -1431,3 +1431,92 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   .countdown-time { font-size: 2.4rem; }
   .quick-btn-num { font-size: 1.8rem; }
 }
+
+/* ---------- Compact layout for 7" tablets (short height) ---------- */
+@media (max-height: 680px) {
+  .header { padding: 8px 16px; }
+  .header-btn, .header-logo { height: 34px; }
+  .room-name { font-size: 1.15rem; }
+
+  .status-panel { padding: 14px 24px 10px; }
+  .clock-time { font-size: 1.5rem; }
+  .clock-date { font-size: 0.9rem; }
+  .clock { margin-bottom: 2px; gap: 8px; }
+  .status-label { font-size: 2.6rem; margin-top: 2px; }
+  .status-sublabel { font-size: 0.95rem; margin-top: 4px; }
+
+  /* Quick actions (FREE) compacts */
+  .quick-actions { padding-top: 12px; }
+  .quick-actions-title { font-size: 0.75rem; margin-bottom: 8px; }
+  .quick-actions-grid { gap: 8px; }
+  .quick-btn { aspect-ratio: auto; padding: 10px 6px; }
+  .quick-btn-num { font-size: 1.6rem; }
+  .quick-btn-unit { font-size: 0.75rem; }
+
+  /* Booked info compacts */
+  .booked-person { gap: 10px; margin-bottom: 6px; }
+  .avatar { width: 42px; height: 42px; font-size: 1rem; }
+  .booked-title { font-size: 1.2rem; }
+  .booked-with { font-size: 0.95rem; }
+  .booked-meta { font-size: 0.8rem; }
+
+  .next-meeting {
+    font-size: 0.85rem;
+    padding: 5px 10px 5px 6px;
+    margin-bottom: 6px;
+  }
+  .next-meeting-label { font-size: 0.7rem; padding: 1px 6px; }
+
+  /* Check-in banner compacts — the critical fix */
+  .checkin-banner {
+    padding: 12px 16px;
+    margin-top: 4px;
+    margin-bottom: 8px;
+    border-radius: 12px;
+  }
+  .checkin-banner-welcome { font-size: 0.82rem; margin-bottom: 0; }
+  .checkin-banner-emoji { font-size: 1rem; }
+  .checkin-banner-title { font-size: 1.15rem; line-height: 1.1; }
+  .checkin-banner-sub { font-size: 0.82rem; margin-top: 2px; margin-bottom: 8px; }
+  .checkin-btn { padding: 12px 22px; font-size: 1rem; gap: 8px; }
+  .checkin-btn svg { width: 18px; height: 18px; }
+  .checkin-cancel-btn { padding: 6px 10px; font-size: 0.85rem; }
+  .checkin-actions { gap: 10px; }
+
+  /* Countdown + end button compacts */
+  .countdown { margin-top: 2px; margin-bottom: 10px; gap: 10px; }
+  .countdown-label { font-size: 0.7rem; }
+  .countdown-time { font-size: 2rem; }
+  .end-btn { padding: 10px 18px; font-size: 0.95rem; }
+  .end-btn svg { width: 18px; height: 18px; }
+  .schedule-other-btn { padding: 8px 14px; font-size: 0.88rem; }
+
+  /* Events panel compacts */
+  .events-header { padding: 10px 16px 8px; }
+  .events-header > span:first-child { font-size: 0.72rem; }
+  .events-header-sub { font-size: 0.72rem; }
+  .day-tabs { padding: 6px 14px 6px; gap: 4px; }
+  .day-tabs button { padding: 6px 4px; font-size: 0.78rem; }
+  .timeline { padding: 8px 16px 6px; }
+  .timeline-track { height: 20px; }
+  .timeline-legend { font-size: 0.65rem; margin-top: 4px; }
+  .events-list { padding: 6px 10px 40px; }
+  .event-item { padding: 10px 12px; }
+  .event-title { font-size: 0.95rem; }
+  .event-time { font-size: 0.82rem; }
+  .event-organizer { font-size: 0.78rem; }
+  .events-group-header { padding: 8px 6px 4px; font-size: 0.66rem; }
+}
+
+/* Even tighter for really short heights */
+@media (max-height: 520px) {
+  .clock-time { font-size: 1.2rem; }
+  .status-label { font-size: 2rem; }
+  .checkin-banner { padding: 8px 12px; margin-bottom: 4px; }
+  .checkin-banner-welcome { display: none; }
+  .checkin-banner-title { font-size: 1rem; }
+  .checkin-btn { padding: 10px 18px; font-size: 0.92rem; }
+  .countdown-time { font-size: 1.6rem; }
+  .booked-person { margin-bottom: 4px; }
+  .avatar { width: 36px; height: 36px; font-size: 0.9rem; }
+}
