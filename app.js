@@ -797,6 +797,13 @@ const modal = {
         document.getElementById("people-field")?.classList.remove("is-invalid");
         const err = document.getElementById("modal-error");
         if (err && /quién reserva/i.test(err.textContent)) err.hidden = true;
+        // Jump to date / start time / duration once a person is chosen
+        if (name) {
+          requestAnimationFrame(() => {
+            const target = document.querySelector("#modal .modal-row");
+            target?.scrollIntoView({ behavior: "smooth", block: "start" });
+          });
+        }
       },
     });
     // Clear any prior highlight
@@ -1169,14 +1176,30 @@ function mountPeoplePicker(containerId, { selectable, onPick }) {
 
   function renderSelectedChip() {
     if (!selectedChip) return;
-    if (!selected) { selectedChip.hidden = true; return; }
+    if (!selected) {
+      selectedChip.hidden = true;
+      host.classList.remove("people-picker--collapsed");
+      return;
+    }
     selectedChip.hidden = false;
+    host.classList.add("people-picker--collapsed");
     selectedChip.innerHTML = "";
     const label = document.createElement("span");
     label.className = "people-selected-label";
     label.textContent = "Seleccionado:";
     const name = document.createElement("strong");
     name.textContent = selected;
+    const change = document.createElement("button");
+    change.type = "button";
+    change.className = "people-selected-change";
+    change.textContent = "Cambiar";
+    change.addEventListener("click", (e) => {
+      e.stopPropagation();
+      selected = null;
+      onPick(null);
+      renderSelectedChip();
+      render();
+    });
     const x = document.createElement("button");
     x.type = "button";
     x.className = "people-selected-clear";
@@ -1191,6 +1214,7 @@ function mountPeoplePicker(containerId, { selectable, onPick }) {
     });
     selectedChip.appendChild(label);
     selectedChip.appendChild(name);
+    selectedChip.appendChild(change);
     selectedChip.appendChild(x);
   }
 

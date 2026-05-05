@@ -1277,6 +1277,23 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 
 .people-selected-clear:hover { background: rgba(255, 255, 255, 0.4); }
 
+.people-selected-change {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  transition: background 0.15s;
+}
+
+.people-selected-change:hover { background: rgba(255, 255, 255, 0.4); }
+
+/* Collapsed state: only the "Seleccionado" chip is visible. */
+.people-picker.people-picker--collapsed .people-search,
+.people-picker.people-picker--collapsed .people-initials,
+.people-picker.people-picker--collapsed .people-grid { display: none; }
+
 .people-search {
   width: 100%;
   padding: 12px 14px;
