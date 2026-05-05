@@ -186,10 +186,17 @@
               <span id="book-date-label">—</span>
             </button>
           </div>
-          <label class="modal-field">
+          <div class="modal-field">
             <span>Hora de inicio</span>
-            <input type="time" id="book-time" step="900" />
-          </label>
+            <button type="button" class="time-trigger" id="book-time-trigger" data-time-target="book-time">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <circle cx="12" cy="12" r="9" />
+                <polyline points="12 7 12 12 15 14" />
+              </svg>
+              <span id="book-time-label">—</span>
+            </button>
+            <input type="hidden" id="book-time" />
+          </div>
         </div>
         <div class="modal-field">
           <span>Duración</span>
@@ -203,10 +210,17 @@
             <button type="button" data-mins="more" class="duration-more">Más…</button>
           </div>
           <div class="duration-custom" id="duration-custom" hidden>
-            <label class="duration-custom-field">
+            <div class="duration-custom-field">
               <span>Hora de fin</span>
-              <input type="time" id="book-end-time" step="900" />
-            </label>
+              <button type="button" class="time-trigger" id="book-end-time-trigger" data-time-target="book-end-time">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <polyline points="12 7 12 12 15 14" />
+                </svg>
+                <span id="book-end-time-label">—</span>
+              </button>
+              <input type="hidden" id="book-end-time" />
+            </div>
             <div class="duration-custom-info" id="duration-custom-info">—</div>
             <button type="button" class="btn btn-secondary" id="duration-back">Volver a duraciones</button>
           </div>
@@ -307,6 +321,33 @@
         <div class="modal-actions">
           <button class="btn btn-secondary" id="cal-today-btn" type="button">Hoy</button>
           <button class="btn btn-secondary" data-date-close>Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Time picker (tablet-friendly) -->
+    <div class="modal" id="time-modal" hidden>
+      <div class="modal-backdrop" data-time-close></div>
+      <div class="modal-panel modal-panel--time">
+        <h2 class="modal-title" id="time-modal-title">Selecciona la hora</h2>
+        <div class="time-display">
+          <span class="time-display-value" id="time-display-hour">--</span>
+          <span class="time-display-sep">:</span>
+          <span class="time-display-value" id="time-display-minute">--</span>
+        </div>
+        <div class="time-picker">
+          <div class="time-col">
+            <div class="time-col-label">Hora</div>
+            <div class="time-grid time-grid--hours" id="time-grid-hours"></div>
+          </div>
+          <div class="time-col time-col--minutes">
+            <div class="time-col-label">Minutos</div>
+            <div class="time-grid time-grid--minutes" id="time-grid-minutes"></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" data-time-close type="button">Cancelar</button>
+          <button class="btn btn-primary" id="time-confirm" type="button">Aceptar</button>
         </div>
       </div>
     </div>
