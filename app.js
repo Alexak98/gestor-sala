@@ -762,7 +762,8 @@ const modal = {
     // Round up to next 15-min slot
     defaultStart.setMinutes(Math.ceil(defaultStart.getMinutes() / 15) * 15, 0, 0);
     setSelectedDate(defaultStart);
-    document.getElementById("book-time").value = toTimeInput(defaultStart);
+    setTimeValue("book-time", toTimeInput(defaultStart));
+    setTimeValue("book-end-time", "");
 
     // Reset duration mode to predefined (30 min selected)
     state.customDuration = false;
@@ -897,6 +898,92 @@ function sameDay(a, b) {
   return a.getFullYear() === b.getFullYear()
     && a.getMonth() === b.getMonth()
     && a.getDate() === b.getDate();
+}
+
+/* =========================================================
+ * Custom time picker (tablet-friendly)
+ * ========================================================= */
+const timePickerState = {
+  inputId: null,
+  hour: null,
+  minute: null,
+};
+
+function setTimeValue(inputId, hhmm) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.value = hhmm || "";
+  const label = document.getElementById(`${inputId}-label`);
+  if (label) label.textContent = hhmm || "—";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+const timePickerModal = {
+  open(inputId, opts = {}) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    timePickerState.inputId = inputId;
+
+    let h = 9, m = 0;
+    const current = (input.value || "").split(":").map(Number);
+    if (!Number.isNaN(current[0]) && !Number.isNaN(current[1])) {
+      h = current[0];
+      m = Math.round(current[1] / 15) * 15;
+      if (m === 60) { h = (h + 1) % 24; m = 0; }
+    }
+    timePickerState.hour = h;
+    timePickerState.minute = m;
+
+    document.getElementById("time-modal-title").textContent = opts.title || "Selecciona la hora";
+    renderTimePicker();
+    document.getElementById("time-modal").hidden = false;
+  },
+  close() {
+    document.getElementById("time-modal").hidden = true;
+    timePickerState.inputId = null;
+  },
+  confirm() {
+    const id = timePickerState.inputId;
+    if (!id) return this.close();
+    const hh = String(timePickerState.hour).padStart(2, "0");
+    const mm = String(timePickerState.minute).padStart(2, "0");
+    setTimeValue(id, `${hh}:${mm}`);
+    this.close();
+  },
+};
+
+function renderTimePicker() {
+  const { hour, minute } = timePickerState;
+  document.getElementById("time-display-hour").textContent = String(hour).padStart(2, "0");
+  document.getElementById("time-display-minute").textContent = String(minute).padStart(2, "0");
+
+  const hoursGrid = document.getElementById("time-grid-hours");
+  hoursGrid.innerHTML = "";
+  for (let h = 0; h < 24; h++) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "time-cell" + (h === hour ? " time-cell--selected" : "");
+    btn.textContent = String(h).padStart(2, "0");
+    btn.addEventListener("click", () => {
+      timePickerState.hour = h;
+      renderTimePicker();
+    });
+    hoursGrid.appendChild(btn);
+  }
+
+  const minsGrid = document.getElementById("time-grid-minutes");
+  minsGrid.innerHTML = "";
+  [0, 15, 30, 45].forEach((m) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "time-cell" + (m === minute ? " time-cell--selected" : "");
+    btn.textContent = `:${String(m).padStart(2, "0")}`;
+    btn.addEventListener("click", () => {
+      timePickerState.minute = m;
+      renderTimePicker();
+    });
+    minsGrid.appendChild(btn);
+  });
 }
 
 /* =========================================================
@@ -1444,6 +1531,19 @@ function init() {
     dateModal.close();
   });
 
+  // Time picker
+  document.querySelectorAll(".time-trigger[data-time-target]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.timeTarget;
+      const title = id === "book-end-time" ? "Hora de fin" : "Hora de inicio";
+      timePickerModal.open(id, { title });
+    });
+  });
+  document.querySelectorAll("[data-time-close]").forEach((el) => {
+    el.addEventListener("click", () => timePickerModal.close());
+  });
+  document.getElementById("time-confirm").addEventListener("click", () => timePickerModal.confirm());
+
   // Title modal — close + confirm + Enter key
   document.querySelectorAll("[data-title-close]").forEach(el => {
     el.addEventListener("click", () => titleModal.close());
@@ -1485,7 +1585,7 @@ function init() {
       // Default end = start + 2h15m, clamped to hour
       const start = getBookingStart() || new Date();
       const end = new Date(start.getTime() + 135 * 60_000);
-      endTimeInput.value = toTimeInput(end);
+      setTimeValue("book-end-time", toTimeInput(end));
       updateCustomDurationInfo();
       return;
     }
