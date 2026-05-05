@@ -256,6 +256,11 @@ function colorFromName(name) {
 }
 
 /* =========================================================
+ * Booking constraints
+ * ========================================================= */
+const BOOKING_HOURS = { start: 8, end: 18 }; // hora de inicio permitida: 08:00–18:00
+
+/* =========================================================
  * State
  * ========================================================= */
 const state = {
@@ -761,6 +766,14 @@ const modal = {
     }
     // Round up to next 15-min slot
     defaultStart.setMinutes(Math.ceil(defaultStart.getMinutes() / 15) * 15, 0, 0);
+    // Clamp to allowed booking hours (start time only)
+    if (defaultStart.getHours() < BOOKING_HOURS.start) {
+      defaultStart.setHours(BOOKING_HOURS.start, 0, 0, 0);
+    } else if (defaultStart.getHours() > BOOKING_HOURS.end) {
+      // Past end of day → next day at opening time
+      defaultStart.setDate(defaultStart.getDate() + 1);
+      defaultStart.setHours(BOOKING_HOURS.start, 0, 0, 0);
+    }
     setSelectedDate(defaultStart);
     setTimeValue("book-time", toTimeInput(defaultStart));
     setTimeValue("book-end-time", "");
@@ -907,6 +920,8 @@ const timePickerState = {
   inputId: null,
   hour: null,
   minute: null,
+  minHour: 0,
+  maxHour: 23,
 };
 
 function setTimeValue(inputId, hhmm) {
@@ -923,6 +938,8 @@ const timePickerModal = {
     const input = document.getElementById(inputId);
     if (!input) return;
     timePickerState.inputId = inputId;
+    timePickerState.minHour = Number.isInteger(opts.minHour) ? opts.minHour : 0;
+    timePickerState.maxHour = Number.isInteger(opts.maxHour) ? opts.maxHour : 23;
 
     let h = 9, m = 0;
     const current = (input.value || "").split(":").map(Number);
@@ -931,6 +948,8 @@ const timePickerModal = {
       m = Math.round(current[1] / 15) * 15;
       if (m === 60) { h = (h + 1) % 24; m = 0; }
     }
+    if (h < timePickerState.minHour) { h = timePickerState.minHour; m = 0; }
+    if (h > timePickerState.maxHour) { h = timePickerState.maxHour; m = 0; }
     timePickerState.hour = h;
     timePickerState.minute = m;
 
@@ -959,7 +978,8 @@ function renderTimePicker() {
 
   const hoursGrid = document.getElementById("time-grid-hours");
   hoursGrid.innerHTML = "";
-  for (let h = 0; h < 24; h++) {
+  const { minHour, maxHour } = timePickerState;
+  for (let h = minHour; h <= maxHour; h++) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "time-cell" + (h === hour ? " time-cell--selected" : "");
@@ -1252,6 +1272,11 @@ async function handleBookConfirm() {
   const [h, mi] = timeStr.split(":").map(Number);
   const start = new Date(y, mo - 1, d, h, mi, 0, 0);
 
+  if (h < BOOKING_HOURS.start || h > BOOKING_HOURS.end) {
+    modal.showError(`La hora de inicio debe estar entre las ${String(BOOKING_HOURS.start).padStart(2,"0")}:00 y las ${String(BOOKING_HOURS.end).padStart(2,"0")}:45`);
+    return;
+  }
+
   if (start.getTime() < Date.now() - 60_000) {
     modal.showError("No se puede reservar en el pasado");
     return;
@@ -1535,8 +1560,10 @@ function init() {
   document.querySelectorAll(".time-trigger[data-time-target]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = btn.dataset.timeTarget;
-      const title = id === "book-end-time" ? "Hora de fin" : "Hora de inicio";
-      timePickerModal.open(id, { title });
+      const opts = id === "book-end-time"
+        ? { title: "Hora de fin" }
+        : { title: "Hora de inicio", minHour: BOOKING_HOURS.start, maxHour: BOOKING_HOURS.end };
+      timePickerModal.open(id, opts);
     });
   });
   document.querySelectorAll("[data-time-close]").forEach((el) => {
