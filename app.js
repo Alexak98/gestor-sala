@@ -339,9 +339,7 @@ function renderStatus() {
     // Countdown
     const endMs = new Date(current.end).getTime();
     const remaining = Math.max(0, endMs - now.getTime());
-    const mm = String(Math.floor(remaining / 60000)).padStart(2, "0");
-    const ss = String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0");
-    document.getElementById("countdown-time").textContent = `${mm}:${ss}`;
+    document.getElementById("countdown-time").textContent = formatCountdown(remaining);
 
     // Amber pulse in the last N minutes
     const endingSoon = remaining > 0 && remaining <= CONFIG.ENDING_SOON_MIN * 60_000;
@@ -407,7 +405,7 @@ function renderStatus() {
     if (next && isSameDay(new Date(next.start), now)) {
       const mins = Math.round((new Date(next.start) - now) / 60000);
       if (mins <= 60) {
-        statusSublabel.textContent = `Próxima reunión en ${mins} min`;
+        statusSublabel.textContent = `Próxima reunión en ${formatMins(mins)}`;
       } else if (mins <= 180) {
         statusSublabel.textContent = `Libre ${formatMins(mins)} · hasta las ${fmtTime(next.start)}`;
       } else {
@@ -1356,7 +1354,7 @@ async function quickBookWithTitle(baseTitle, person) {
   const created = await createEvent({ title, startISO: start.toISOString(), endISO: end.toISOString() });
   // Auto-check-in: the person is physically here
   await autoCheckinAfterCreate(created, start);
-  toast(`Reservado ${mins} min — ${person}`, "success");
+  toast(`Reservado ${formatMins(mins)} — ${person}`, "success");
   await loadEvents();
 }
 
@@ -1476,6 +1474,22 @@ function formatMins(mins) {
   const h = Math.floor(mins / 60), m = mins % 60;
   if (m === 0) return h === 1 ? "1 hora" : `${h} horas`;
   return `${h}h ${m}min`;
+}
+
+// Live countdown: under 1h shows MM:SS, 1h+ shows H:MM:SS so the user can
+// always read the remaining hours at a glance instead of e.g. "119:30".
+function formatCountdown(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const ss = String(s).padStart(2, "0");
+  if (h > 0) {
+    const mm = String(m).padStart(2, "0");
+    return `${h}:${mm}:${ss}`;
+  }
+  const mm = String(m).padStart(2, "0");
+  return `${mm}:${ss}`;
 }
 
 function fmtDateTime(iso) {
