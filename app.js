@@ -75,6 +75,29 @@ const CONFIG = {
 };
 
 /* =========================================================
+ * Perf primitives
+ * =========================================================
+ * Hot-path caches: created once, reused on every tick.
+ * - Intl formatters are otherwise rebuilt per call (~ms each).
+ * - PEOPLE_LOWER turns the linear splitTitle() lookup into O(1).
+ * - $() memoizes getElementById; the DOM here never re-mounts.
+ * ========================================================= */
+const FMT_TIME       = new Intl.DateTimeFormat(CONFIG.LOCALE, { hour: "2-digit", minute: "2-digit", hour12: false });
+const FMT_DATE_FULL  = new Intl.DateTimeFormat(CONFIG.LOCALE, { weekday: "long", day: "numeric", month: "long" });
+const FMT_DATE_SHORT = new Intl.DateTimeFormat(CONFIG.LOCALE, { day: "numeric", month: "short" });
+const FMT_MONTH_YEAR = new Intl.DateTimeFormat(CONFIG.LOCALE, { month: "long", year: "numeric" });
+const FMT_GROUP_HDR  = new Intl.DateTimeFormat(CONFIG.LOCALE, { weekday: "long", day: "numeric", month: "long" });
+
+const PEOPLE_LOWER = new Set(CONFIG.PEOPLE.map(p => p.trim().toLowerCase()));
+
+const _domCache = Object.create(null);
+function $(id) {
+  let el = _domCache[id];
+  if (!el || !el.isConnected) el = _domCache[id] = document.getElementById(id);
+  return el;
+}
+
+/* =========================================================
  * Mock data (used while USE_MOCK = true)
  * ========================================================= */
 function buildMockEvents() {
@@ -180,9 +203,13 @@ async function checkInEvent(eventId) {
 async function endEvent(eventId) {
   if (CONFIG.USE_MOCK || !CONFIG.N8N_END_EVENT_URL) {
     await new Promise(r => setTimeout(r, 500));
-    // Simulate: shorten mock event end to now
+    // Simulate: shorten mock event end to now — keep startMs/endMs in sync.
     const ev = state.events.find(e => e.id === eventId);
-    if (ev) ev.end = new Date().toISOString();
+    if (ev) {
+      const now = Date.now();
+      ev.end = new Date(now).toISOString();
+      ev.endMs = now;
+    }
     return { id: eventId };
   }
   const res = await fetch(CONFIG.N8N_END_EVENT_URL, {
@@ -201,19 +228,34 @@ async function endEvent(eventId) {
  */
 function normalizeEvents(raw) {
   const items = Array.isArray(raw) ? raw : (raw.events || raw.items || raw.data || []);
-  return items.map(ev => ({
-    id: ev.id,
-    title: ev.title || ev.summary || "(sin título)",
-    organizer:
-      ev.organizer ||
-      ev.organizerName ||
-      (ev.organizer && ev.organizer.displayName) ||
-      (ev.creator && ev.creator.displayName) ||
-      "",
-    start: ev.start?.dateTime || ev.start?.date || ev.start,
-    end: ev.end?.dateTime || ev.end?.date || ev.end,
-    description: ev.description || "",
-  })).filter(ev => ev.start && ev.end);
+  const out = [];
+  for (let i = 0; i < items.length; i++) {
+    const ev = items[i];
+    const start = ev.start?.dateTime || ev.start?.date || ev.start;
+    const end   = ev.end?.dateTime   || ev.end?.date   || ev.end;
+    if (!start || !end) continue;
+    const startMs = Date.parse(start);
+    const endMs   = Date.parse(end);
+    if (Number.isNaN(startMs) || Number.isNaN(endMs)) continue;
+    out.push({
+      id: ev.id,
+      title: ev.title || ev.summary || "(sin título)",
+      organizer:
+        (typeof ev.organizer === "string" && ev.organizer) ||
+        ev.organizerName ||
+        ev.organizer?.displayName ||
+        ev.creator?.displayName ||
+        "",
+      start,
+      end,
+      startMs,
+      endMs,
+      description: ev.description || "",
+    });
+  }
+  // Pre-sort once — getNextEvent/getCurrentEvent then run in O(n) without re-sorting per tick.
+  out.sort((a, b) => a.startMs - b.startMs);
+  return out;
 }
 
 function isCheckedIn(ev) {
@@ -229,11 +271,8 @@ function splitTitle(full) {
   const idx = full.lastIndexOf(" — ");
   if (idx < 0) return { cleanTitle: full, person: null };
   const person = full.slice(idx + 3).trim();
-  // Only treat as person if it matches one we know, to avoid false positives
-  const known = CONFIG.PEOPLE.some(
-    p => p.trim().toLowerCase() === person.toLowerCase()
-  );
-  if (!known) return { cleanTitle: full, person: null };
+  // O(1) via PEOPLE_LOWER Set — was O(n) per render (called twice per tick).
+  if (!PEOPLE_LOWER.has(person.toLowerCase())) return { cleanTitle: full, person: null };
   return { cleanTitle: full.slice(0, idx).trim(), person };
 }
 
@@ -281,22 +320,27 @@ const state = {
  * Clock
  * ========================================================= */
 let lastListMinute = -1;
+let lastClockMinute = -1;
 function tickClock() {
+  // Cheapest possible early-out — when the kiosk screen is off, do nothing.
+  // Saves ~3600 ticks/h of layout work + GC pressure.
+  if (document.visibilityState === "hidden") return;
+
   const now = new Date();
-  const time = now.toLocaleTimeString(CONFIG.LOCALE, {
-    hour: "2-digit", minute: "2-digit", hour12: false,
-  });
-  const date = now.toLocaleDateString(CONFIG.LOCALE, {
-    weekday: "long", day: "numeric", month: "long",
-  });
-  document.getElementById("clock-time").textContent = time;
-  document.getElementById("clock-date").textContent = capitalize(date);
-
-  // Re-render status every tick (cheap) to keep countdown fresh
-  renderStatus();
-
-  // Re-render the event list once per minute to drop just-ended events
   const mKey = now.getHours() * 60 + now.getMinutes();
+
+  // Clock text only changes once a minute — don't reformat or touch the DOM
+  // on the other 59 ticks per minute.
+  if (mKey !== lastClockMinute) {
+    lastClockMinute = mKey;
+    $("clock-time").textContent = FMT_TIME.format(now);
+    $("clock-date").textContent = capitalize(FMT_DATE_FULL.format(now));
+  }
+
+  // Status panel (countdown) still needs per-second freshness.
+  renderStatus(now);
+
+  // Event list — drop just-ended items once a minute.
   if (mKey !== lastListMinute) {
     lastListMinute = mKey;
     renderEventsList();
@@ -308,148 +352,195 @@ function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 /* =========================================================
  * Status panel rendering
  * ========================================================= */
-function getCurrentEvent(now = new Date()) {
-  return state.events.find(ev => {
-    const s = new Date(ev.start), e = new Date(ev.end);
-    return s <= now && now < e;
-  }) || null;
+// Hot path — called every second. Uses pre-computed ms and the sorted invariant
+// so we avoid `new Date()` × 2 × n per tick and skip the .filter().sort() chain entirely.
+function getCurrentEvent(now = Date.now()) {
+  const nowMs = typeof now === "number" ? now : now.getTime();
+  const events = state.events;
+  for (let i = 0, n = events.length; i < n; i++) {
+    const ev = events[i];
+    if (ev.startMs > nowMs) return null;          // sorted → no later event can match
+    if (nowMs < ev.endMs)   return ev;
+  }
+  return null;
 }
 
-function getNextEvent(now = new Date()) {
-  return state.events
-    .filter(ev => new Date(ev.start) > now)
-    .sort((a, b) => new Date(a.start) - new Date(b.start))[0] || null;
+function getNextEvent(now = Date.now()) {
+  const nowMs = typeof now === "number" ? now : now.getTime();
+  const events = state.events;
+  for (let i = 0, n = events.length; i < n; i++) {
+    if (events[i].startMs > nowMs) return events[i];
+  }
+  return null;
 }
 
-function renderStatus() {
-  const now = new Date();
-  const current = getCurrentEvent(now);
-  const next = getNextEvent(now);
-  const app = document.getElementById("app");
-  const statusLabel = document.getElementById("status-label");
-  const statusSublabel = document.getElementById("status-sublabel");
-  const progressBar = document.getElementById("progress-bar");
-  const progressFill = document.getElementById("progress-bar-fill");
+// Per-second diff cache — every DOM write below is gated on a change vs prior tick.
+// Touching .textContent / .style on identical values still triggers style recalc,
+// so skipping them is a real win on a 24/7 kiosk.
+const _renderPrev = {
+  status: null, label: null, sublabel: null,
+  countdown: null, ending: null, progress: null, progressHidden: null,
+  bookedInfoHidden: null, bookedTitle: null, withHidden: null, personName: null,
+  avatarText: null, avatarBg: null, avatarHidden: null, organizer: null,
+  nextHidden: null, nextText: null,
+};
+function setText(el, val, key) {
+  if (_renderPrev[key] === val) return;
+  _renderPrev[key] = val;
+  el.textContent = val;
+}
+function setHidden(el, hidden, key) {
+  if (_renderPrev[key] === hidden) return;
+  _renderPrev[key] = hidden;
+  el.hidden = hidden;
+}
+function setStyle(el, prop, val, key) {
+  if (_renderPrev[key] === val) return;
+  _renderPrev[key] = val;
+  el.style[prop] = val;
+}
+function setDataStatus(el, val, key) {
+  if (_renderPrev[key] === val) return;
+  _renderPrev[key] = val;
+  el.dataset.status = val;
+}
+
+function renderStatus(nowArg) {
+  const now = nowArg || new Date();
+  const nowMs = now.getTime();
+  const current = getCurrentEvent(nowMs);
+  const next = getNextEvent(nowMs);
+
+  const app = $("app");
+  const statusLabel = $("status-label");
+  const statusSublabel = $("status-sublabel");
+  const progressBar = $("progress-bar");
+  const progressFill = $("progress-bar-fill");
 
   if (current) {
-    app.dataset.status = "booked";
-    statusLabel.textContent = "OCUPADA";
-    statusSublabel.textContent = `Hasta las ${fmtTime(current.end)}`;
+    setDataStatus(app, "booked", "status");
+    setText(statusLabel, "OCUPADA", "label");
+    setText(statusSublabel, `Hasta las ${fmtTime(current.endMs)}`, "sublabel");
 
     // Countdown
-    const endMs = new Date(current.end).getTime();
-    const remaining = Math.max(0, endMs - now.getTime());
-    document.getElementById("countdown-time").textContent = formatCountdown(remaining);
+    const remaining = Math.max(0, current.endMs - nowMs);
+    setText($("countdown-time"), formatCountdown(remaining), "countdown");
 
-    // Amber pulse in the last N minutes
     const endingSoon = remaining > 0 && remaining <= CONFIG.ENDING_SOON_MIN * 60_000;
-    document.getElementById("countdown-wrap").classList.toggle("countdown--ending", endingSoon);
+    if (_renderPrev.ending !== endingSoon) {
+      _renderPrev.ending = endingSoon;
+      $("countdown-wrap").classList.toggle("countdown--ending", endingSoon);
+    }
 
-    // Progress bar (elapsed)
-    const totalMs = new Date(current.end) - new Date(current.start);
+    // Progress bar — round to 0.1% so identical pixel-widths skip the layout flush.
+    const totalMs = current.endMs - current.startMs;
     const pct = totalMs > 0 ? Math.min(1, 1 - remaining / totalMs) : 0;
-    progressFill.style.width = `${pct * 100}%`;
-    progressBar.hidden = false;
+    const pctStr = `${(Math.round(pct * 1000) / 10)}%`;
+    setStyle(progressFill, "width", pctStr, "progress");
+    setHidden(progressBar, false, "progressHidden");
 
-    document.getElementById("booked-info").hidden = false;
+    setHidden($("booked-info"), false, "bookedInfoHidden");
 
-    // Split "Título — Persona" for richer display + avatar
     const { cleanTitle, person } = splitTitle(current.title);
-    document.getElementById("booked-title").textContent = cleanTitle || current.title;
-    const withEl = document.getElementById("booked-with");
-    const nameEl = document.getElementById("booked-person-name");
-    const avatarEl = document.getElementById("booked-avatar");
+    setText($("booked-title"), cleanTitle || current.title, "bookedTitle");
+
+    const withEl = $("booked-with");
+    const nameEl = $("booked-person-name");
+    const avatarEl = $("booked-avatar");
     if (person) {
-      withEl.hidden = false;
-      nameEl.textContent = person;
-      avatarEl.textContent = getInitials(person);
-      avatarEl.style.background = colorFromName(person);
-      avatarEl.hidden = false;
+      setHidden(withEl, false, "withHidden");
+      setText(nameEl, person, "personName");
+      setText(avatarEl, getInitials(person), "avatarText");
+      setStyle(avatarEl, "background", colorFromName(person), "avatarBg");
+      setHidden(avatarEl, false, "avatarHidden");
     } else {
-      withEl.hidden = true;
-      avatarEl.textContent = "";
-      avatarEl.style.background = "rgba(255,255,255,0.15)";
-      avatarEl.hidden = !current.organizer;
-      if (!person && current.organizer) {
-        avatarEl.textContent = getInitials(current.organizer);
-        avatarEl.style.background = colorFromName(current.organizer);
+      setHidden(withEl, true, "withHidden");
+      if (current.organizer) {
+        setText(avatarEl, getInitials(current.organizer), "avatarText");
+        setStyle(avatarEl, "background", colorFromName(current.organizer), "avatarBg");
+        setHidden(avatarEl, false, "avatarHidden");
+      } else {
+        setText(avatarEl, "", "avatarText");
+        setStyle(avatarEl, "background", "rgba(255,255,255,0.15)", "avatarBg");
+        setHidden(avatarEl, true, "avatarHidden");
       }
     }
-    document.getElementById("booked-organizer").textContent =
-      (!person && current.organizer) ? `Organiza ${current.organizer}` : "";
+    setText(
+      $("booked-organizer"),
+      (!person && current.organizer) ? `Organiza ${current.organizer}` : "",
+      "organizer",
+    );
 
-    // "Próxima en X min" banner if there's a near event
-    const nextEl = document.getElementById("next-meeting");
-    const nextTextEl = document.getElementById("next-meeting-text");
+    // "Próxima en X min" banner
+    const nextEl = $("next-meeting");
     if (next) {
-      const minsToNext = Math.round((new Date(next.start) - now) / 60_000);
+      const minsToNext = Math.round((next.startMs - nowMs) / 60_000);
       if (minsToNext > 0 && minsToNext <= CONFIG.NEXT_WARN_MIN) {
-        nextEl.hidden = false;
+        setHidden(nextEl, false, "nextHidden");
         const nextSplit = splitTitle(next.title);
         const label = nextSplit.person || nextSplit.cleanTitle || next.title;
-        nextTextEl.textContent = `${fmtTime(next.start)} · ${label} (en ${minsToNext} min)`;
+        setText($("next-meeting-text"), `${fmtTime(next.startMs)} · ${label} (en ${minsToNext} min)`, "nextText");
       } else {
-        nextEl.hidden = true;
+        setHidden(nextEl, true, "nextHidden");
       }
     } else {
-      nextEl.hidden = true;
+      setHidden(nextEl, true, "nextHidden");
     }
 
-    // Check-in / auto-cancel logic
     handleCheckinState(current, now);
   } else {
-    app.dataset.status = "free";
-    statusLabel.textContent = "LIBRE";
-    progressBar.hidden = true;
+    setDataStatus(app, "free", "status");
+    setText(statusLabel, "LIBRE", "label");
+    setHidden(progressBar, true, "progressHidden");
 
-    if (next && isSameDay(new Date(next.start), now)) {
-      const mins = Math.round((new Date(next.start) - now) / 60000);
-      if (mins <= 60) {
-        statusSublabel.textContent = `Próxima reunión en ${formatMins(mins)}`;
-      } else if (mins <= 180) {
-        statusSublabel.textContent = `Libre ${formatMins(mins)} · hasta las ${fmtTime(next.start)}`;
-      } else {
-        statusSublabel.textContent = `Libre hasta las ${fmtTime(next.start)}`;
-      }
+    let sublabel;
+    if (next && isSameDay(new Date(next.startMs), now)) {
+      const mins = Math.round((next.startMs - nowMs) / 60_000);
+      if (mins <= 60)        sublabel = `Próxima reunión en ${formatMins(mins)}`;
+      else if (mins <= 180)  sublabel = `Libre ${formatMins(mins)} · hasta las ${fmtTime(next.startMs)}`;
+      else                   sublabel = `Libre hasta las ${fmtTime(next.startMs)}`;
     } else {
-      statusSublabel.textContent = "Sin reuniones programadas hoy";
+      sublabel = "Sin reuniones programadas hoy";
     }
+    setText(statusSublabel, sublabel, "sublabel");
 
-    document.getElementById("booked-info").hidden = true;
-    document.getElementById("checkin-banner").hidden = true;
-    document.getElementById("countdown-wrap")?.classList.remove("countdown--ending");
+    setHidden($("booked-info"), true, "bookedInfoHidden");
+    setHidden($("checkin-banner"), true, "checkinHidden");
+    if (_renderPrev.ending !== false) {
+      _renderPrev.ending = false;
+      $("countdown-wrap")?.classList.remove("countdown--ending");
+    }
   }
 }
 
 function handleCheckinState(ev, now) {
-  const banner = document.getElementById("checkin-banner");
-  const sub = document.getElementById("checkin-banner-sub");
-  const endBtn = document.getElementById("end-btn");
-  const countdownWrap = document.getElementById("countdown-wrap");
+  const banner = $("checkin-banner");
+  const sub = $("checkin-banner-sub");
+  const endBtn = $("end-btn");
+  const countdownWrap = $("countdown-wrap");
 
   if (isCheckedIn(ev)) {
-    banner.hidden = true;
-    endBtn.hidden = false;
-    countdownWrap.style.display = "";
+    if (_renderPrev.checkinHidden !== true) { _renderPrev.checkinHidden = true; banner.hidden = true; }
+    if (_renderPrev.endBtnHidden !== false) { _renderPrev.endBtnHidden = false; endBtn.hidden = false; }
+    if (_renderPrev.countdownDisplay !== "") { _renderPrev.countdownDisplay = ""; countdownWrap.style.display = ""; }
     return;
   }
 
-  const startMs = new Date(ev.start).getTime();
-  const deadlineMs = startMs + CONFIG.CHECKIN_WINDOW_MIN * 60_000;
+  const deadlineMs = ev.startMs + CONFIG.CHECKIN_WINDOW_MIN * 60_000;
   const remaining = deadlineMs - now.getTime();
 
   if (remaining > 0) {
-    // Check-in pending: show banner, hide countdown + end btn to focus attention
-    banner.hidden = false;
-    endBtn.hidden = true;
-    countdownWrap.style.display = "none";
+    if (_renderPrev.checkinHidden !== false) { _renderPrev.checkinHidden = false; banner.hidden = false; }
+    if (_renderPrev.endBtnHidden !== true)   { _renderPrev.endBtnHidden = true;   endBtn.hidden = true; }
+    if (_renderPrev.countdownDisplay !== "none") { _renderPrev.countdownDisplay = "none"; countdownWrap.style.display = "none"; }
     const mm = String(Math.floor(remaining / 60000)).padStart(2, "0");
     const ss = String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0");
-    sub.textContent = `Se cancelará en ${mm}:${ss} si no confirmas`;
+    const txt = `Se cancelará en ${mm}:${ss} si no confirmas`;
+    if (_renderPrev.checkinSub !== txt) { _renderPrev.checkinSub = txt; sub.textContent = txt; }
   } else {
     // Window elapsed. The server-side cron (every 5 min) is the main mechanism.
     // Client-side fallback: auto-cancel, but with guardrails against races.
-    banner.hidden = true;
+    if (_renderPrev.checkinHidden !== true) { _renderPrev.checkinHidden = true; banner.hidden = true; }
 
     // If a check-in request is in flight, give it time to land.
     if (state.checkingIn) return;
@@ -513,67 +604,60 @@ function isSameDay(a, b) {
  * Events list rendering
  * ========================================================= */
 function renderEventsList() {
-  const list = document.getElementById("events-list");
+  const list = $("events-list");
   const now = new Date();
+  const nowMs = now.getTime();
 
-  // Timeline reflects the selected day view
   renderTimeline(now);
 
   const todayK = dayKey(now);
-  const tomorrowK = dayKey(new Date(now.getTime() + 86_400_000));
+  const tomorrowK = dayKey(new Date(nowMs + 86_400_000));
+  const weekCutoffMs = nowMs + CONFIG.AGENDA_WEEK_DAYS * 86_400_000;
 
-  // Filter by day view
-  let visible = state.events.filter(ev => new Date(ev.end) > now);
-  if (state.dayView === "today") {
-    visible = visible.filter(ev => dayKey(new Date(ev.start)) === todayK);
-  } else if (state.dayView === "tomorrow") {
-    visible = visible.filter(ev => dayKey(new Date(ev.start)) === tomorrowK);
-  } else {
-    // week: next 7 days from today
-    const cutoff = new Date(now.getTime() + CONFIG.AGENDA_WEEK_DAYS * 86_400_000);
-    visible = visible.filter(ev => new Date(ev.start) < cutoff);
+  // Single linear pass — was 3 nested .filter() chains, each parsing Date strings.
+  // state.events is pre-sorted, so groups stay sorted without re-sorting per group.
+  const groups = new Map();
+  const view = state.dayView;
+  const events = state.events;
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    if (ev.endMs <= nowMs) continue;
+    const k = dayKey(new Date(ev.startMs));
+    if (view === "today" && k !== todayK) continue;
+    if (view === "tomorrow" && k !== tomorrowK) continue;
+    if (view === "week" && ev.startMs >= weekCutoffMs) continue;
+    let bucket = groups.get(k);
+    if (!bucket) { bucket = []; groups.set(k, bucket); }
+    bucket.push(ev);
   }
 
-  if (!visible.length) {
+  if (!groups.size) {
     const emptyMsg =
-      state.dayView === "today" ? "Sin reuniones el resto del día" :
-      state.dayView === "tomorrow" ? "Sin reuniones mañana" :
-      "Sin reuniones en los próximos días";
+      view === "today"    ? "Sin reuniones el resto del día" :
+      view === "tomorrow" ? "Sin reuniones mañana" :
+                            "Sin reuniones en los próximos días";
     list.innerHTML = `<div class="events-empty">${escapeHtml(emptyMsg)}</div>`;
     return;
   }
 
-  const groups = new Map();
-  for (const ev of visible) {
-    const k = dayKey(new Date(ev.start));
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(ev);
-  }
-
+  // Build one string then a single innerHTML write — minimal layout passes.
   const sortedKeys = [...groups.keys()].sort();
-  const html = sortedKeys.map(key => {
-    let header;
-    if (key === todayK) header = "HOY";
-    else if (key === tomorrowK) header = "MAÑANA";
-    else header = groupHeaderFromKey(key);
-
-    const items = groups.get(key)
-      .sort((a, b) => new Date(a.start) - new Date(b.start))
-      .map(ev => renderEventItem(ev, now))
-      .join("");
-
-    return `<div class="events-group-header">${escapeHtml(header)}</div>${items}`;
-  }).join("");
-
+  let html = "";
+  for (let i = 0; i < sortedKeys.length; i++) {
+    const key = sortedKeys[i];
+    const header = key === todayK ? "HOY" : key === tomorrowK ? "MAÑANA" : groupHeaderFromKey(key);
+    html += `<div class="events-group-header">${escapeHtml(header)}</div>`;
+    const items = groups.get(key);
+    for (let j = 0; j < items.length; j++) html += renderEventItem(items[j], nowMs);
+  }
   list.innerHTML = html;
 }
 
-function renderEventItem(ev, now) {
-  const s = new Date(ev.start), e = new Date(ev.end);
-  const isCurrent = s <= now && now < e;
-  const timeFmt = { hour: "2-digit", minute: "2-digit", hour12: false };
-  const sStr = s.toLocaleTimeString(CONFIG.LOCALE, timeFmt);
-  const eStr = e.toLocaleTimeString(CONFIG.LOCALE, timeFmt);
+function renderEventItem(ev, nowMs) {
+  const isCurrent = ev.startMs <= nowMs && nowMs < ev.endMs;
+  // Cached Intl formatter — was instantiating one per call.
+  const sStr = FMT_TIME.format(ev.startMs);
+  const eStr = FMT_TIME.format(ev.endMs);
   const idAttr = escapeHtml(ev.id);
 
   return `
@@ -602,14 +686,14 @@ function renderEventItem(ev, now) {
 /* =========================================================
  * Mini timeline of today
  * ========================================================= */
+let _timelineHoursRendered = false;
 function renderTimeline(now = new Date()) {
-  const track = document.getElementById("timeline-track");
-  const hoursEl = document.getElementById("timeline-hours");
-  const subEl = document.getElementById("events-header-sub");
-  const timelineEl = document.getElementById("timeline");
+  const track = $("timeline-track");
+  const hoursEl = $("timeline-hours");
+  const subEl = $("events-header-sub");
+  const timelineEl = $("timeline");
   if (!track || !hoursEl) return;
 
-  // Hide timeline entirely on "week" view
   if (state.dayView === "week") {
     timelineEl.hidden = true;
     if (subEl) subEl.textContent = `Próximos ${CONFIG.AGENDA_WEEK_DAYS} días`;
@@ -623,54 +707,64 @@ function renderTimeline(now = new Date()) {
   const targetKey = dayKey(targetDate);
 
   const startHour = CONFIG.DAY_START_HOUR;
-  const endHour = CONFIG.DAY_END_HOUR;
-  const startMin = startHour * 60;
-  const endMin = endHour * 60;
-  const rangeMin = endMin - startMin;
+  const endHour   = CONFIG.DAY_END_HOUR;
+  const startMin  = startHour * 60;
+  const endMin    = endHour * 60;
+  const rangeMin  = endMin - startMin;
 
-  // Hour labels every 2h
-  hoursEl.innerHTML = "";
-  for (let h = startHour; h <= endHour; h += 2) {
-    const s = document.createElement("span");
-    s.textContent = `${String(h).padStart(2, "0")}:00`;
-    hoursEl.appendChild(s);
+  // Hour labels are static — render only once over the lifetime of the page.
+  if (!_timelineHoursRendered) {
+    const frag = document.createDocumentFragment();
+    for (let h = startHour; h <= endHour; h += 2) {
+      const s = document.createElement("span");
+      s.textContent = `${String(h).padStart(2, "0")}:00`;
+      frag.appendChild(s);
+    }
+    hoursEl.replaceChildren(frag);
+    _timelineHoursRendered = true;
   }
 
-  // Wipe existing blocks
-  track.querySelectorAll(".timeline-block").forEach(b => b.remove());
+  // Wipe existing blocks — collect in a single pass, then detach via fragment swap.
+  const oldBlocks = track.getElementsByClassName("timeline-block");
+  while (oldBlocks.length) oldBlocks[0].remove();
 
-  const dayEvents = state.events
-    .filter(ev => dayKey(new Date(ev.start)) === targetKey)
-    .sort((a, b) => new Date(a.start) - new Date(b.start));
-
+  const nowMs = now.getTime();
+  const blockFrag = document.createDocumentFragment();
   let busyMinutes = 0;
-  for (const ev of dayEvents) {
-    const s = new Date(ev.start), e = new Date(ev.end);
+  const events = state.events;
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    // events are sorted — once we pass the target day we can break.
+    // (cheap key-check still needed because we span midnight by date string)
+    const s = new Date(ev.startMs);
+    if (dayKey(s) !== targetKey) continue;
+
     const sMin = s.getHours() * 60 + s.getMinutes();
+    const e = new Date(ev.endMs);
     const eMin = e.getHours() * 60 + e.getMinutes();
-    const clampedStart = Math.max(sMin, startMin);
-    const clampedEnd = Math.min(eMin, endMin);
+    const clampedStart = sMin > startMin ? sMin : startMin;
+    const clampedEnd   = eMin < endMin   ? eMin : endMin;
     if (clampedEnd <= clampedStart) continue;
 
     busyMinutes += clampedEnd - clampedStart;
 
-    const leftPct = ((clampedStart - startMin) / rangeMin) * 100;
-    const widthPct = ((clampedEnd - clampedStart) / rangeMin) * 100;
+    const leftPct  = ((clampedStart - startMin) / rangeMin) * 100;
+    const widthPct = ((clampedEnd   - clampedStart) / rangeMin) * 100;
 
     const block = document.createElement("div");
-    block.className = "timeline-block";
-    if (state.dayView === "today" && s <= now && now < e) {
-      block.classList.add("timeline-block--current");
+    let cls = "timeline-block";
+    if (state.dayView === "today" && ev.startMs <= nowMs && nowMs < ev.endMs) {
+      cls += " timeline-block--current";
     }
-    block.style.left = `${leftPct}%`;
-    block.style.width = `${widthPct}%`;
-    block.title = `${ev.title} · ${fmtTime(ev.start)}–${fmtTime(ev.end)}`;
+    block.className = cls;
+    block.style.cssText = `left:${leftPct}%;width:${widthPct}%`;
+    block.title = `${ev.title} · ${fmtTime(ev.startMs)}–${fmtTime(ev.endMs)}`;
     block.dataset.eventId = ev.id;
-    track.appendChild(block);
+    blockFrag.appendChild(block);
   }
+  track.appendChild(blockFrag);
 
-  // "Now" indicator only on today view
-  const nowEl = document.getElementById("timeline-now");
+  const nowEl = $("timeline-now");
   if (state.dayView !== "today") {
     nowEl.hidden = true;
   } else {
@@ -682,14 +776,18 @@ function renderTimeline(now = new Date()) {
       nowEl.style.left = `${((nowMin - startMin) / rangeMin) * 100}%`;
     }
   }
+  // dayEvents count for sub-header summary
+  let dayEventCount = 0;
+  for (let i = 0; i < events.length; i++) {
+    if (dayKey(new Date(events[i].startMs)) === targetKey) dayEventCount++;
+  }
 
-  // Sub-header summary
   if (subEl) {
     const busyH = Math.floor(busyMinutes / 60);
     const busyM = busyMinutes % 60;
     const dayLabel = state.dayView === "tomorrow" ? "mañana" : "hoy";
     const txt = busyMinutes
-      ? `${dayEvents.length} ${dayEvents.length === 1 ? "reunión" : "reuniones"} ${dayLabel} · ${busyH ? busyH + "h " : ""}${busyM}min ocupada`
+      ? `${dayEventCount} ${dayEventCount === 1 ? "reunión" : "reuniones"} ${dayLabel} · ${busyH ? busyH + "h " : ""}${busyM}min ocupada`
       : `Sin reuniones ${dayLabel}`;
     subEl.textContent = txt;
   }
@@ -733,10 +831,7 @@ function dayKey(d) {
 
 function groupHeaderFromKey(key) {
   const [y, m, d] = key.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString(CONFIG.LOCALE, {
-    weekday: "long", day: "numeric", month: "long",
-  }).toUpperCase();
+  return FMT_GROUP_HDR.format(new Date(y, m - 1, d)).toUpperCase();
 }
 
 function escapeHtml(s) {
@@ -1117,15 +1212,21 @@ async function handleTitleConfirm() {
  * Renders a full people picker: search box + initial-letter filter + grid.
  * options.selectable — if true, keeps the selected button highlighted.
  */
+// Sort + lowercase the people list ONCE at module load. Was re-sorted on every
+// modal open + the filter() ran toLowerCase() per name per keystroke.
+const _PEOPLE_SORTED = [...CONFIG.PEOPLE]
+  .map(s => s.trim())
+  .filter(Boolean)
+  .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }))
+  .map(name => ({ name, lower: name.toLowerCase(), upper0: name[0].toUpperCase() }));
+const _PEOPLE_INITIALS = [...new Set(_PEOPLE_SORTED.map(p => p.upper0))].sort();
+
 function mountPeoplePicker(containerId, { selectable, onPick }) {
   const host = document.getElementById(containerId);
-  host.innerHTML = "";
+  host.replaceChildren();
 
-  const people = [...CONFIG.PEOPLE]
-    .map(s => s.trim())
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }));
-  const initials = [...new Set(people.map(n => n[0].toUpperCase()))].sort();
+  const people = _PEOPLE_SORTED;
+  const initials = _PEOPLE_INITIALS;
 
   // Persistent "Seleccionado" chip (selectable mode only)
   let selectedChip = null;
@@ -1216,44 +1317,57 @@ function mountPeoplePicker(containerId, { selectable, onPick }) {
     selectedChip.appendChild(x);
   }
 
+  // Delegated click on the grid — one listener instead of N (≈28).
+  grid.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-person]");
+    if (!btn) return;
+    const name = btn.dataset.person;
+    if (selectable) {
+      selected = name;
+      renderSelectedChip();
+      const prev = grid.querySelector("button.selected");
+      if (prev && prev !== btn) prev.classList.remove("selected");
+      btn.classList.add("selected");
+    }
+    onPick(name);
+  });
+
   function render() {
-    grid.innerHTML = "";
     const q = activeQuery.toLowerCase();
-    const filtered = people.filter(n => {
-      if (activeLetter && !n.toUpperCase().startsWith(activeLetter)) return false;
-      if (q && !n.toLowerCase().includes(q)) return false;
-      return true;
-    });
-    if (!filtered.length) {
+    const frag = document.createDocumentFragment();
+    let count = 0;
+    for (let i = 0, n = people.length; i < n; i++) {
+      const p = people[i];
+      if (activeLetter && p.upper0 !== activeLetter) continue;
+      if (q && p.lower.indexOf(q) === -1) continue;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = p.name;
+      b.dataset.person = p.name;
+      if (selectable && selected === p.name) b.className = "selected";
+      frag.appendChild(b);
+      count++;
+    }
+    if (!count) {
       const empty = document.createElement("div");
       empty.className = "people-empty";
       empty.textContent = "Sin resultados";
-      grid.appendChild(empty);
-      return;
+      frag.appendChild(empty);
     }
-    for (const name of filtered) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = name;
-      b.dataset.person = name;
-      if (selectable && selected === name) b.classList.add("selected");
-      b.addEventListener("click", () => {
-        if (selectable) {
-          selected = name;
-          renderSelectedChip();
-          grid.querySelectorAll("button").forEach(x =>
-            x.classList.toggle("selected", x.dataset.person === name)
-          );
-        }
-        onPick(name);
-      });
-      grid.appendChild(b);
-    }
+    grid.replaceChildren(frag);
+  }
+
+  // rAF-coalesce: rapid keystrokes only trigger one render per frame.
+  let _renderPending = false;
+  function scheduleRender() {
+    if (_renderPending) return;
+    _renderPending = true;
+    requestAnimationFrame(() => { _renderPending = false; render(); });
   }
 
   search.addEventListener("input", (e) => {
     activeQuery = e.target.value;
-    render();
+    scheduleRender();
   });
 
   initialsRow.addEventListener("click", (e) => {
@@ -1333,10 +1447,15 @@ async function handleBookConfirm() {
 }
 
 function findConflict(start, end) {
-  return state.events.find(ev => {
-    const s = new Date(ev.start), e = new Date(ev.end);
-    return s < end && start < e;
-  });
+  const startMs = start instanceof Date ? start.getTime() : start;
+  const endMs   = end   instanceof Date ? end.getTime()   : end;
+  const events = state.events;
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    if (ev.startMs >= endMs) break; // sorted — no later event can overlap
+    if (ev.endMs > startMs) return ev;
+  }
+  return null;
 }
 
 async function quickBookWithTitle(baseTitle, person) {
@@ -1464,9 +1583,9 @@ async function handleEndConfirm() {
 }
 
 function fmtTime(iso) {
-  return new Date(iso).toLocaleTimeString(CONFIG.LOCALE, {
-    hour: "2-digit", minute: "2-digit", hour12: false,
-  });
+  // Accepts ISO string OR a numeric ms timestamp (faster for pre-normalized events).
+  const t = typeof iso === "number" ? iso : Date.parse(iso);
+  return FMT_TIME.format(t);
 }
 
 function formatMins(mins) {
@@ -1493,9 +1612,8 @@ function formatCountdown(ms) {
 }
 
 function fmtDateTime(iso) {
-  const d = new Date(iso);
-  const date = d.toLocaleDateString(CONFIG.LOCALE, { day: "numeric", month: "short" });
-  return `${date} ${fmtTime(iso)}`;
+  const t = typeof iso === "number" ? iso : Date.parse(iso);
+  return `${FMT_DATE_SHORT.format(t)} ${FMT_TIME.format(t)}`;
 }
 
 /* =========================================================
@@ -1514,20 +1632,45 @@ function toast(msg, kind = "") {
 /* =========================================================
  * Data loading
  * ========================================================= */
-async function loadEvents() {
+// Fetch lifecycle: in-flight lock prevents overlapping fetches when the network
+// is slow, exponential backoff stops us hammering n8n when it's down, and we
+// prune autoCancelled so a kiosk that runs for weeks doesn't accumulate IDs.
+let _fetchInFlight = false;
+let _fetchBackoffMs = 0;
+let _fetchBackoffUntil = 0;
+async function loadEvents({ force = false } = {}) {
+  if (_fetchInFlight) return;
+  if (!force && Date.now() < _fetchBackoffUntil) return;
+  _fetchInFlight = true;
   try {
     const events = await fetchEvents();
     state.events = events;
     state.lastFetch = Date.now();
     state.lastFetchOk = Date.now();
     state.fetchFailing = false;
+    _fetchBackoffMs = 0;
+    _fetchBackoffUntil = 0;
+
+    // Prune autoCancelled — drop IDs that the server no longer returns so the
+    // Set can't grow indefinitely on a long-running kiosk.
+    if (state.autoCancelled.size) {
+      const live = new Set();
+      for (let i = 0; i < events.length; i++) live.add(events[i].id);
+      for (const id of state.autoCancelled) if (!live.has(id)) state.autoCancelled.delete(id);
+    }
+
     renderEventsList();
     renderStatus();
     updateOfflineBadge();
   } catch (err) {
     console.error("Error cargando eventos:", err);
     state.fetchFailing = true;
+    // Exponential backoff: 5s → 10s → 20s → … capped at 5 min.
+    _fetchBackoffMs = Math.min(300_000, _fetchBackoffMs ? _fetchBackoffMs * 2 : 5_000);
+    _fetchBackoffUntil = Date.now() + _fetchBackoffMs;
     updateOfflineBadge();
+  } finally {
+    _fetchInFlight = false;
   }
 }
 
@@ -1773,13 +1916,35 @@ function init() {
     }
   });
 
-  // Prevent tablet screen sleep hint (needs user interaction on most browsers)
-  if ("wakeLock" in navigator) {
-    document.addEventListener("click", async function requestWakeOnce() {
-      try { await navigator.wakeLock.request("screen"); } catch (_) {}
-      document.removeEventListener("click", requestWakeOnce);
-    });
+  // Prevent tablet screen sleep hint (needs user interaction on most browsers).
+  // We retain the wake-lock object so we can re-acquire it after visibilitychange,
+  // since browsers drop it on tab/page hide.
+  let _wakeLock = null;
+  async function acquireWake() {
+    if (!("wakeLock" in navigator)) return;
+    try { _wakeLock = await navigator.wakeLock.request("screen"); }
+    catch (_) { _wakeLock = null; }
   }
+  document.addEventListener("click", function requestWakeOnce() {
+    acquireWake();
+    document.removeEventListener("click", requestWakeOnce);
+  });
+
+  // When the tablet wakes from sleep:
+  //   1. The 60s fetch interval has been paused — force-refresh immediately so
+  //      the screen doesn't show minutes-old data.
+  //   2. Re-acquire the screen wake-lock (browsers drop it on visibility hide).
+  //   3. Reset the diff cache so the next renderStatus repaints from scratch
+  //      (the DOM may have been frozen mid-update).
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    for (const k in _renderPrev) _renderPrev[k] = null;
+    lastClockMinute = -1;
+    lastListMinute = -1;
+    tickClock();
+    loadEvents({ force: true });
+    acquireWake();
+  });
 }
 
 document.addEventListener("DOMContentLoaded", init);
