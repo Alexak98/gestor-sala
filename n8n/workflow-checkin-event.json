@@ -29,7 +29,7 @@
         "operation": "get",
         "calendar": {
           "__rl": true,
-          "value": "c_36b4c6c75706ffff8b32d991f27c2ac8e0b338cfd8d2c580259d7e8fb02fd191@group.calendar.google.com",
+          "value": "c_188d385r8vgt8gpglcpq5ta97cfos@resource.calendar.google.com",
           "mode": "id"
         },
         "eventId": "={{ $json.body.eventId }}"
@@ -52,7 +52,7 @@
         "operation": "update",
         "calendar": {
           "__rl": true,
-          "value": "c_36b4c6c75706ffff8b32d991f27c2ac8e0b338cfd8d2c580259d7e8fb02fd191@group.calendar.google.com",
+          "value": "c_188d385r8vgt8gpglcpq5ta97cfos@resource.calendar.google.com",
           "mode": "id"
         },
         "eventId": "={{ $json.id }}",
