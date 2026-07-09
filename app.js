@@ -7,11 +7,11 @@ const CONFIG = {
   ROOM_NAME: "Sala Reuniones",
 
   // n8n webhooks
-  N8N_GET_EVENTS_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-eventos",
-  N8N_CREATE_EVENT_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-reservar",
-  N8N_END_EVENT_URL: "https://n8n-soporte.data.yurest.dev/webhook/sala-finalizar",
-  N8N_CHECKIN_URL:   "https://n8n-soporte.data.yurest.dev/webhook/sala-checkin",
-  N8N_DELETE_URL:    "https://n8n-soporte.data.yurest.dev/webhook/sala-eliminar",
+  N8N_GET_EVENTS_URL: "https://n8n.yurest.dev/webhook/sala-eventos",
+  N8N_CREATE_EVENT_URL: "https://n8n.yurest.dev/webhook/sala-reservar",
+  N8N_END_EVENT_URL: "https://n8n.yurest.dev/webhook/sala-finalizar",
+  N8N_CHECKIN_URL:   "https://n8n.yurest.dev/webhook/sala-checkin",
+  N8N_DELETE_URL:    "https://n8n.yurest.dev/webhook/sala-eliminar",
 
   // Check-in window (minutes): si no se confirma dentro de este tiempo
   // desde el inicio del evento, se cancela automáticamente
