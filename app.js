@@ -48,7 +48,6 @@ const CONFIG = {
     "Borja Pastor",
     "Santiago Andres",
     "Paula Schmidt",
-    "Aline Perles",
     "Stefania Sulis",
     "Javier Molina",
     "Carlos Llopis",
@@ -68,6 +67,10 @@ const CONFIG = {
     "Rafael Gonzalez",
     "Maria Fernandez",
     "Marina Rubio",
+    "Josefina",
+    "Mago",
+    "Daniel",
+    "Karla",
   ],
 
   // Títulos sugeridos para reserva rápida (chips)
