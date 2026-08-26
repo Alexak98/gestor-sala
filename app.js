@@ -71,6 +71,8 @@ const CONFIG = {
     "Mago",
     "Daniel",
     "Karla",
+    "Laura Vaquero",
+    "Ninoska",
   ],
 
   // Títulos sugeridos para reserva rápida (chips)
