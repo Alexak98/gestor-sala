@@ -41,18 +41,18 @@ const CONFIG = {
   // Lista de personas que pueden reservar — EDITA AQUÍ
   PEOPLE: [
     "Alex",
-    "Alvaro Jareño",
+    "Álvaro Jareño",
     "Luis Bahamonde",
     "Miguel Vilata",
-    "Pedro Martin",
+    "Pedro Martín",
     "Borja Pastor",
-    "Santiago Andres",
+    "Santiago Andrés",
     "Paula Schmidt",
     "Stefania Sulis",
     "Javier Molina",
     "Carlos Llopis",
     "Raquel Batalla",
-    "Victor",
+    "Víctor",
     "Pablo Claramunt",
     "Juan Daniel",
     "Luis Alejandro",
@@ -61,18 +61,17 @@ const CONFIG = {
     "Carlos Aparicio",
     "Hugo Zalazar",
     "Mario Labrandero",
-    "Ivan Ramirez",
+    "Iván Ramírez",
     "Rino Luigi",
     "Javier Feliu",
-    "Rafael Gonzalez",
-    "Maria Fernandez",
+    "Rafael González",
+    "María Fernández",
     "Marina Rubio",
-    "Josefina",
     "Mago",
     "Daniel",
     "Karla",
-    "Laura Vaquero",
     "Ninoska",
+    "André",
   ],
 
   // Títulos sugeridos para reserva rápida (chips)
@@ -93,7 +92,13 @@ const FMT_DATE_SHORT = new Intl.DateTimeFormat(CONFIG.LOCALE, { day: "numeric", 
 const FMT_MONTH_YEAR = new Intl.DateTimeFormat(CONFIG.LOCALE, { month: "long", year: "numeric" });
 const FMT_GROUP_HDR  = new Intl.DateTimeFormat(CONFIG.LOCALE, { weekday: "long", day: "numeric", month: "long" });
 
-const PEOPLE_LOWER = new Set(CONFIG.PEOPLE.map(p => p.trim().toLowerCase()));
+// Accent/case-insensitive key: "Iván Ramírez" and "Ivan Ramirez" match, so
+// bookings created before a name got its tildes are still recognised.
+function foldName(s) {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+}
+
+const PEOPLE_LOWER = new Set(CONFIG.PEOPLE.map(foldName));
 
 const _domCache = Object.create(null);
 function $(id) {
@@ -277,7 +282,7 @@ function splitTitle(full) {
   if (idx < 0) return { cleanTitle: full, person: null };
   const person = full.slice(idx + 3).trim();
   // O(1) via PEOPLE_LOWER Set — was O(n) per render (called twice per tick).
-  if (!PEOPLE_LOWER.has(person.toLowerCase())) return { cleanTitle: full, person: null };
+  if (!PEOPLE_LOWER.has(foldName(person))) return { cleanTitle: full, person: null };
   return { cleanTitle: full.slice(0, idx).trim(), person };
 }
 
@@ -1223,7 +1228,10 @@ const _PEOPLE_SORTED = [...CONFIG.PEOPLE]
   .map(s => s.trim())
   .filter(Boolean)
   .sort((a, b) => a.localeCompare(b, "es", { sensitivity: "base" }))
-  .map(name => ({ name, lower: name.toLowerCase(), upper0: name[0].toUpperCase() }));
+  .map(name => {
+    const lower = foldName(name);
+    return { name, lower, upper0: lower[0].toUpperCase() };
+  });
 const _PEOPLE_INITIALS = [...new Set(_PEOPLE_SORTED.map(p => p.upper0))].sort();
 
 function mountPeoplePicker(containerId, { selectable, onPick }) {
@@ -1338,7 +1346,7 @@ function mountPeoplePicker(containerId, { selectable, onPick }) {
   });
 
   function render() {
-    const q = activeQuery.toLowerCase();
+    const q = foldName(activeQuery);
     const frag = document.createDocumentFragment();
     let count = 0;
     for (let i = 0, n = people.length; i < n; i++) {
